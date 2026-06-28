@@ -1,0 +1,616 @@
+(function () {
+  'use strict';
+
+  // ── Leaflet loader — shared promise so CSS+JS are fetched only once ───────
+  let _leafletPromise = null;
+  function loadLeaflet() {
+    if (_leafletPromise) return _leafletPromise;
+    _leafletPromise = Promise.all([
+      import('https://esm.sh/leaflet@1.9.4'),
+      fetch('https://esm.sh/leaflet@1.9.4/dist/leaflet.css').then(r => r.text())
+    ]).then(([mod, css]) => ({ L: mod.default, css }));
+    return _leafletPromise;
+  }
+
+  // ── Tile layer URLs ───────────────────────────────────────────────────────
+  const TILES = {
+    light: {
+      url:         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom:     19,
+    },
+    dark: {
+      url:         'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom:     20,
+      subdomains:  'abcd',
+    },
+  };
+
+  // ── CSS injected into shadow root when dark mode is active ────────────────
+  const DARK_POPUP_CSS = `
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+      background: #1e2433;
+      color: #e2e8f0;
+      box-shadow: 0 3px 14px rgba(0,0,0,.7);
+    }
+    .leaflet-popup-close-button { color: #94a3b8 !important; }
+    .leaflet-bar a {
+      background-color: #1e2433 !important;
+      color: #e2e8f0 !important;
+      border-color: #374151 !important;
+    }
+    .leaflet-bar a:hover { background-color: #2d3748 !important; }
+    .leaflet-control-attribution {
+      background: rgba(30,36,51,.85) !important;
+      color: #64748b !important;
+    }
+    .leaflet-control-attribution a { color: #60a5fa !important; }`;
+
+  // ── Normalise MSFS locPak key → plain ICAO designator ────────────────────
+  // "ATCCOM.AC_MODEL_B738.0.tts" → "B738"   (suffixed)
+  // "ATCCOM.AC_MODEL_A350"       → "A350"    (bare)
+  // "B738"                       → "B738"    (already plain)
+  function normalizeType(icaoType) {
+    if (!icaoType) return '';
+    return icaoType
+      .replace(/^ATCCOM\.AC_MODEL_(.+?)(?:\.\d+\.(?:tts|text))?$/, '$1')
+      .toUpperCase().trim();
+  }
+
+  // ── Aircraft type classification from ICAO designator ────────────────────
+  function classifyType(icaoType) {
+    if (!icaoType) return 'generic';
+    const t = normalizeType(icaoType);
+
+    const heliExact = ['EC35','EC45','EC55','EC65','EC75','EC25','R22','R44','R66',
+      'B06','B07','B206','B407','B412','B429','B505','H125','H130','H135','H145',
+      'H155','H160','H175','H215','H225','A109','A119','A139','A169','A189',
+      'MD902','MD520','LYNX','PUMA','MERLIN','CHUK','GALE','S76','S92',
+      'UH60','UH72','AH64','CH47','CH53','MH60','MH47'];
+    if (heliExact.includes(t)) return 'helicopter';
+    if (/^(EC[0-9]|R[24][0-9]?|H[0-9]|BO[0-9]|BK[0-9]|AS3[0-9]|AS5[0-9]|SA3[0-9]|AW[0-9]|S7[0-9]|S9[0-9]|UH|AH|CH|MH|HH|OH)/.test(t)) return 'helicopter';
+
+    const gliderExact = ['ASK21','ASK13','ASK18','LS4','LS6','LS8','LS10','DG40','DG60','DG80',
+      'ASG29','ASH31','ASW28','ASW27','PIK20','K21','K8','K13','G103','SF25',
+      'JS1','EB28','SZD50','SZD55','PW5','PW6','LAK17','NIMB'];
+    if (gliderExact.includes(t)) return 'sailplane';
+    if (/^(ASK|ASW|ASG|ASH|LS[0-9]|DG[0-9]|K-?[0-9]|LAK|PIK|SZD|NIMB|PW[0-9]|JS[0-9])/.test(t)) return 'sailplane';
+
+    const milExact = ['F16','F15','F18','F35','F22','F14','F5','F4','A10','AV8B',
+      'B1','B2','B52','EF2000','EUFI','GROB','GRPEN','MIG29','MIG35',
+      'SU27','SU30','SU35','SU57','KC135','KC10','KC767','E3','E8','P3','P8',
+      'C130','C17','C5','U2','SR71','T38','T45','L39','MB339','M346'];
+    if (milExact.includes(t)) return 'military';
+    if (/^(F[0-9]{1,2}[A-Z]?$|AV8|B[12][A-Z]?$|EF[0-9]|MIG|SU[0-9]{2}|YAK[0-9]|KC[0-9]|E-?3[A-Z]|T-?[0-9]{2})/.test(t)) return 'military';
+
+    const tpExact = ['ATR42','ATR72','DH8A','DH8B','DH8C','DH8D','Q300','Q400',
+      'SF34','SW4','BE1900','BE99','E120','MA60','MA600','IL18','AN24','AN26',
+      'DHC6','DHC7','P180','C208','PC12','JS32','JS41','L410','LET4'];
+    if (tpExact.includes(t)) return 'turboprop';
+    if (/^(ATR|DH8|DHC|SF3|AT[4-7]|AN[0-9]|IL1[0-9]|LET|L41|SW[0-9]|JS[0-9]|C208|PC1[02])/.test(t)) return 'turboprop';
+
+    const rjExact = ['CRJ2','CRJ7','CRJ9','CRJX','E170','E175','E190','E195',
+      'ERJ145','ERJ135','ARJ21','MRJ90','MRJ70','BCS1','BCS3','RJ85','RJ1H',
+      'B461','B462','B463','DC91','DC92','DC93','F70','F100','BAE146'];
+    if (rjExact.includes(t)) return 'regional-jet';
+    if (/^(CRJ|ERJ|E17[05]|E19[05]|BCS|ARJ|MRJ|RJ[0-9]|F7[05]|F10[05]|B46[0-9])/.test(t)) return 'regional-jet';
+
+    // Large jets: classic codes + Boeing MAX (B3[789X]M), 787-10 (B7[0-9]X),
+    // Airbus NEO/XLR narrow-body (A[12][0-9][NX]), NEO/K wide-body (A3[0-9][NK])
+    if (/^(B7[0-9]{2}|B7[0-9]X|B3[789X]M|A[23][0-9]{2}|A[12][0-9][NX]|A3[0-9][NK]|A38[08]|DC1[08]|MD1[01]|MD8[0-9]|MD9[0-9]|L101|IL6[246]|IL7[46]|IL9[06]|TU[0-9]{3}|AN1[24]|AN1[47]|AN2[24]|C5[AB]?)/.test(t)) return 'large-jet';
+
+    return 'ga';
+  }
+
+  // ── SVG cache for lazy-loaded aircraft shapes ─────────────────────────────
+  const _svgCache   = new Map(); // filename → svg text
+  const _svgLoading = new Map(); // filename → in-flight Promise (dedup concurrent fetches)
+
+  function requireSvg(filename) {
+    if (_svgCache.has(filename))   return Promise.resolve(_svgCache.get(filename));
+    if (_svgLoading.has(filename)) return _svgLoading.get(filename);
+    const url = `https://cdn.jsdelivr.net/gh/RexKramer1/AircraftShapesSVG@main/Shapes%20SVG/${encodeURIComponent(filename)}`;
+    const p = fetch(url)
+      .then(r => r.ok ? r.text() : null)
+      .then(text => { if (text) _svgCache.set(filename, text); _svgLoading.delete(filename); return text; })
+      .catch(() => { _svgLoading.delete(filename); return null; });
+    _svgLoading.set(filename, p);
+    return p;
+  }
+
+  // Category fallback filenames — one known SVG per category
+  const CATEGORY_SVG = {
+    'large-jet':    'B738.svg',
+    'regional-jet': 'CRJ9.svg',
+    'turboprop':    'DH8D.svg',
+    'ga':           'C172.svg',
+    'helicopter':   'R44.svg',
+    'sailplane':    'ASK21.svg',
+    'military':     'F16.svg',
+    'generic':      'C172.svg',
+  };
+
+  function getSvgFilename(icaoType) {
+    const t = normalizeType(icaoType);
+    return t ? t + '.svg' : null;
+  }
+
+  function getCategoryFallback(icaoType) {
+    return CATEGORY_SVG[classifyType(icaoType)] || null;
+  }
+
+  // ── Altitude-based color (ADSBExchange/tar1090 scheme) ───────────────────
+  function altColor(altFt) {
+    if (altFt == null || altFt === '') return 'hsl(0,0%,75%)';
+    const ft = Number(altFt);
+    if (ft <= 0) return 'hsl(0,0%,45%)';
+    let hue;
+    if (ft < 2000)        hue = 20;
+    else if (ft < 10000)  hue = 20  + (ft - 2000)  / 8000  * 120;
+    else if (ft <= 40000) hue = 140 + (ft - 10000) / 30000 * 160;
+    else                  hue = 300;
+    return `hsl(${Math.round(hue)},88%,44%)`;
+  }
+
+  // ── Icon helpers ──────────────────────────────────────────────────────────
+
+  // Map icon-size attr (0–10) to pixels: 0→40 px, 5→80 px, 10→120 px
+  function iconPx(sizeAttr) { return 40 + sizeAttr * 6; }
+
+  function makeIcon(L, heading, svgText, color, sizeAttr) {
+    const px = iconPx(sizeAttr);
+    // Replace fill color, resize SVG element, inject rotation + drop-shadow
+    const html = svgText
+      .replace(/#000000/gi, color)
+      .replace(/<svg\b([^>]*)>/,
+        (_, attrs) => `<svg${attrs
+          .replace(/\swidth="[^"]*"/g, '')
+          .replace(/\sheight="[^"]*"/g, '')
+        } width="${px}" height="${px}"` +
+        ` style="transform:rotate(${heading}deg);transform-origin:center;` +
+        `filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));display:block">`
+      );
+    return L.divIcon({
+      html, className: '',
+      iconSize:    [px, px],
+      iconAnchor:  [px / 2, px / 2],
+      popupAnchor: [0, -Math.ceil(px / 2) - 2],
+    });
+  }
+
+  function makeDotIcon(L, color, sizeAttr) {
+    const px  = iconPx(sizeAttr);
+    const r   = Math.max(4, Math.round(px / 8));
+    const cx  = px / 2;
+    const html = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}">` +
+                 `<circle cx="${cx}" cy="${cx}" r="${r}" fill="${color}" opacity=".75"/></svg>`;
+    return L.divIcon({
+      html, className: '',
+      iconSize:    [px, px],
+      iconAnchor:  [cx, cx],
+      popupAnchor: [0, -Math.ceil(cx) - 2],
+    });
+  }
+
+  // ── Shadow DOM template ───────────────────────────────────────────────────
+  const template = document.createElement('template');
+  template.innerHTML = `
+    <style>
+      :host {
+        display: block;
+        width: 100%;
+        height: 500px;
+        position: relative;
+        font-family: sans-serif;
+      }
+      #map { width: 100%; height: 100%; }
+
+      /* ── overlays ── */
+      #ws-status, #follow-status {
+        position: absolute;
+        z-index: 1000;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        color: #fff;
+        pointer-events: none;
+        transition: background .3s;
+      }
+      #ws-status {
+        top: 8px; right: 8px;
+      }
+      #ws-status.connecting   { background: rgba(150,90,0,.8); }
+      #ws-status.connected    { background: rgba(0,110,0,.8); }
+      #ws-status.disconnected { background: rgba(170,0,0,.8); }
+
+      #follow-status {
+        bottom: 28px; left: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(37,99,235,.85);
+        pointer-events: all;
+      }
+      #follow-status[hidden] { display: none; }
+      #follow-status button {
+        background: none;
+        border: none;
+        color: #fff;
+        cursor: pointer;
+        font-size: 15px;
+        line-height: 1;
+        padding: 0 2px;
+        opacity: .8;
+      }
+      #follow-status button:hover { opacity: 1; }
+    </style>
+    <div id="map"></div>
+    <div id="ws-status" class="connecting">connecting…</div>
+    <div id="follow-status" hidden>
+      <span>▶</span>
+      <span id="follow-label"></span>
+      <button type="button" data-joinfs-unfollow aria-label="Stop following">×</button>
+    </div>`;
+
+  // ── Custom element ────────────────────────────────────────────────────────
+  class JoinFsMap extends HTMLElement {
+    static get observedAttributes() { return ['uri', 'stale-timeout', 'theme', 'follow', 'icon-size']; }
+
+    constructor() {
+      super();
+      this.attachShadow({ mode: 'open' });
+      this.shadowRoot.appendChild(template.content.cloneNode(true));
+      this._markers        = new Map();
+      this._L              = null;
+      this._map            = null;
+      this._tileLayer      = null;
+      this._themeStyle     = null;
+      this._mq             = null;
+      this._mqListener     = null;
+      this._isDark         = false;
+      this._ws             = null;
+      this._reconnectTimer = null;
+      this._staleTimer     = null;
+    }
+
+    connectedCallback() {
+      this._initMap().then(() => this._connect());
+    }
+
+    disconnectedCallback() {
+      this._teardown();
+    }
+
+    attributeChangedCallback(name) {
+      if (name === 'uri' && this._ws) { this._teardown(); this._connect(); }
+      if (name === 'theme')           { this._applyTheme(); }
+      if (name === 'follow')          { this._applyFollow(); }
+      if (name === 'icon-size')       { this._refreshAllIcons(); }
+    }
+
+    // ── attribute getters ─────────────────────────────────────────────────
+
+    get _uri() {
+      return this.getAttribute('uri') || 'ws://localhost:8765/ws/';
+    }
+
+    get _staleMs() {
+      const v = parseInt(this.getAttribute('stale-timeout'), 10);
+      return (Number.isFinite(v) && v > 0 ? v : 60) * 1000;
+    }
+
+    get _follow() {
+      return (this.getAttribute('follow') || '').trim().toLowerCase();
+    }
+
+    // icon-size: 0–10, default 5
+    get _iconSize() {
+      const v = parseInt(this.getAttribute('icon-size'), 10);
+      return Math.min(10, Math.max(0, Number.isFinite(v) ? v : 5));
+    }
+
+    // ── init ──────────────────────────────────────────────────────────────
+
+    async _initMap() {
+      const { L, css } = await loadLeaflet();
+      this._L = L;
+
+      const leafletStyle = document.createElement('style');
+      leafletStyle.textContent = css;
+      this.shadowRoot.prepend(leafletStyle);
+
+      this._themeStyle = document.createElement('style');
+      this._themeStyle.id = 'joinfs-theme';
+      this.shadowRoot.appendChild(this._themeStyle);
+
+      const lat  = parseFloat(this.getAttribute('lat'))    || 51.0;
+      const lon  = parseFloat(this.getAttribute('lon'))    || 10.0;
+      const zoom = parseInt(this.getAttribute('zoom'), 10) || 6;
+
+      const mapEl = this.shadowRoot.querySelector('#map');
+      this._map = L.map(mapEl, { zoomControl: true }).setView([lat, lon], zoom);
+
+      this._applyTheme();
+
+      // Event delegation: Follow / Unfollow buttons inside Leaflet popups
+      mapEl.addEventListener('click', e => {
+        const followBtn   = e.target.closest('[data-joinfs-follow]');
+        const unfollowBtn = e.target.closest('[data-joinfs-unfollow]');
+
+        if (followBtn) {
+          e.preventDefault();
+          const cs      = followBtn.dataset.joinfsFollow;
+          const current = this._follow;
+          if (current === cs.toLowerCase()) {
+            this.removeAttribute('follow');
+            this._dispatch('joinfs-follow', { callsign: null });
+          } else {
+            this.setAttribute('follow', cs);
+            this._dispatch('joinfs-follow', { callsign: cs });
+          }
+          this._map.closePopup();
+        }
+
+        if (unfollowBtn) {
+          e.preventDefault();
+          this.removeAttribute('follow');
+          this._dispatch('joinfs-follow', { callsign: null });
+        }
+      });
+
+      this._staleTimer = setInterval(() => this._purgeStale(), 15_000);
+
+      if (this._follow) this._applyFollow();
+    }
+
+    // ── theme ─────────────────────────────────────────────────────────────
+
+    _applyTheme() {
+      const attr = this.getAttribute('theme');
+      const isAuto = !attr || attr === 'auto';
+      if (isAuto) {
+        if (!this._mq) {
+          this._mq = window.matchMedia('(prefers-color-scheme: dark)');
+          this._mqListener = () => this._applyTheme();
+          this._mq.addEventListener('change', this._mqListener);
+        }
+        this._isDark = this._mq.matches;
+      } else {
+        if (this._mq) {
+          this._mq.removeEventListener('change', this._mqListener);
+          this._mq = null; this._mqListener = null;
+        }
+        this._isDark = attr === 'dark';
+      }
+      this._swapTileLayer();
+      if (this._themeStyle)
+        this._themeStyle.textContent = this._isDark ? DARK_POPUP_CSS : '';
+    }
+
+    _swapTileLayer() {
+      if (!this._L || !this._map) return;
+      const cfg = this._isDark ? TILES.dark : TILES.light;
+      if (this._tileLayer) this._map.removeLayer(this._tileLayer);
+      this._tileLayer = this._L.tileLayer(cfg.url, {
+        attribution: cfg.attribution,
+        maxZoom:     cfg.maxZoom,
+        ...(cfg.subdomains ? { subdomains: cfg.subdomains } : {}),
+      }).addTo(this._map);
+    }
+
+    // ── follow ────────────────────────────────────────────────────────────
+
+    _matchesFollow(ac) {
+      const t = this._follow;
+      if (!t) return false;
+      return (ac.callsign || '').toLowerCase() === t ||
+             (ac.nickname || '').toLowerCase() === t;
+    }
+
+    _applyFollow() {
+      const statusEl = this.shadowRoot.querySelector('#follow-status');
+      const labelEl  = this.shadowRoot.querySelector('#follow-label');
+      const target   = this._follow;
+
+      if (statusEl) {
+        statusEl.hidden = !target;
+        if (labelEl) labelEl.textContent = target || '';
+      }
+
+      if (!this._map || !target) return;
+
+      for (const [, entry] of this._markers) {
+        if (this._matchesFollow(entry.ac)) {
+          this._map.panTo([entry.ac.latitude, entry.ac.longitude], { animate: true });
+          break;
+        }
+      }
+    }
+
+    // ── WebSocket ─────────────────────────────────────────────────────────
+
+    _connect() {
+      const uri = this._uri;
+      this._setStatus('connecting', 'connecting…');
+      let ws;
+      try { ws = new WebSocket(uri); }
+      catch { this._scheduleReconnect(); return; }
+      this._ws = ws;
+      ws.onopen    = () => this._setStatus('connected', `● ${uri}`);
+      ws.onclose   = () => { this._setStatus('disconnected', 'disconnected — retrying…'); this._scheduleReconnect(); };
+      ws.onerror   = () => { /* onclose always follows */ };
+      ws.onmessage = ({ data }) => { try { this._onMessage(JSON.parse(data)); } catch {} };
+    }
+
+    _scheduleReconnect() {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = setTimeout(() => this._connect(), 4000);
+    }
+
+    _teardown() {
+      clearTimeout(this._reconnectTimer);
+      clearInterval(this._staleTimer);
+      if (this._mq && this._mqListener) {
+        this._mq.removeEventListener('change', this._mqListener);
+        this._mq = null; this._mqListener = null;
+      }
+      if (this._ws) { this._ws.onclose = null; this._ws.close(); this._ws = null; }
+    }
+
+    _setStatus(cls, text) {
+      const el = this.shadowRoot.querySelector('#ws-status');
+      el.className = cls;
+      el.textContent = text;
+    }
+
+    _dispatch(name, detail) {
+      this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail }));
+    }
+
+    // ── aircraft data ─────────────────────────────────────────────────────
+
+    _onMessage(msg) {
+      if (msg.type !== 'aircraft_update') return;
+      for (const ac of msg.aircraft) this._updateAircraft(ac);
+    }
+
+    _updateAircraft(ac) {
+      if (!this._L || !this._map) return;
+      const L     = this._L;
+      const key   = ac.guid || ac.callsign;
+      const ll    = [ac.latitude, ac.longitude];
+      const color = altColor(ac.altitude);
+      const size  = this._iconSize;
+
+      if (this._markers.has(key)) {
+        const entry    = this._markers.get(key);
+        entry.ac       = ac;
+        entry.lastSeen = Date.now();
+        const icon = entry.svgText
+          ? makeIcon(L, ac.heading, entry.svgText, color, size)
+          : makeDotIcon(L, color, size);
+        entry.marker.setLatLng(ll).setIcon(icon);
+        if (entry.marker.isPopupOpen())
+          entry.marker.getPopup().setContent(this._popupHtml(ac));
+      } else {
+        const entry = { ac, lastSeen: Date.now(), marker: null, svgText: null };
+        const marker = L.marker(ll, { icon: makeDotIcon(L, color, size) })
+          .addTo(this._map)
+          .bindPopup(() => this._popupHtml(entry.ac), { maxWidth: 300 });
+        entry.marker = marker;
+        this._markers.set(key, entry);
+      }
+
+      if (this._matchesFollow(ac)) {
+        this._map.panTo(ll, { animate: true });
+      }
+
+      // Async SVG upgrade: try exact ICAO filename, then category fallback
+      const filename = getSvgFilename(ac.icaoType);
+      if (filename) {
+        requireSvg(filename)
+          .then(svgText => svgText || requireSvg(getCategoryFallback(ac.icaoType)))
+          .then(svgText => {
+            if (!svgText) return;
+            const entry = this._markers.get(key);
+            if (!entry) return;
+            entry.svgText = svgText;
+            entry.marker.setIcon(
+              makeIcon(L, entry.ac.heading, svgText, altColor(entry.ac.altitude), this._iconSize)
+            );
+          });
+      }
+    }
+
+    _purgeStale() {
+      const cutoff = Date.now() - this._staleMs;
+      for (const [key, entry] of this._markers) {
+        if (entry.lastSeen < cutoff) {
+          entry.marker.remove();
+          this._markers.delete(key);
+        }
+      }
+    }
+
+    // Rebuild all marker icons when icon-size attribute changes
+    _refreshAllIcons() {
+      if (!this._L) return;
+      for (const [, entry] of this._markers) {
+        const color = altColor(entry.ac.altitude);
+        const size  = this._iconSize;
+        entry.marker.setIcon(
+          entry.svgText
+            ? makeIcon(this._L, entry.ac.heading, entry.svgText, color, size)
+            : makeDotIcon(this._L, color, size)
+        );
+      }
+    }
+
+    // ── popup HTML ────────────────────────────────────────────────────────
+
+    _popupHtml(ac) {
+      if (!ac) return '';
+      const dark    = this._isDark;
+      const text    = dark ? '#e2e8f0' : '#1a202c';
+      const muted   = dark ? '#94a3b8' : '#6b7280';
+      const sub     = dark ? '#64748b' : '#9ca3af';
+      const divider = dark ? '#334155' : '#e5e7eb';
+      const typeCode = normalizeType(ac.icaoType);
+      const color    = altColor(ac.altitude);
+      const followed = this._matchesFollow(ac);
+
+      const row = (lbl, val) =>
+        (val != null && val !== '' && val !== '0' && val !== 0)
+          ? `<tr>
+               <td style="color:${muted};padding:1px 10px 1px 0;white-space:nowrap">${lbl}</td>
+               <td style="font-weight:600;color:${text}">${val}</td>
+             </tr>`
+          : '';
+
+      const route   = [ac.from, ac.to].filter(Boolean).join(' → ');
+      const lights  = ac.lights  ? Object.entries(ac.lights) .filter(([,v]) => v).map(([k]) => k).join(', ') : '';
+      const engines = ac.engines ? Object.entries(ac.engines).filter(([,v]) => v).map(([k]) => k.replace('Running','')).join(', ') : '';
+
+      return `
+        <div style="font-family:sans-serif;font-size:13px;min-width:190px;color:${text}">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px;
+                      border-bottom:2px solid ${color};padding-bottom:4px">
+            <span style="color:${color}">✈</span> ${ac.callsign || '—'}
+            ${typeCode ? `<span style="font-weight:400;font-size:12px;color:${muted}"> · ${typeCode}</span>` : ''}
+          </div>
+          <table style="border-collapse:collapse;line-height:1.55">
+            ${row('Pilot',    ac.nickname)}
+            ${row('Route',    route)}
+            ${row('Rules',    ac.rules)}
+            ${row('Altitude', ac.altitude   ? Number(ac.altitude).toLocaleString() + ' ft' : '')}
+            ${row('Speed',    ac.speed      ? Math.round(ac.speed) + ' kts' : '')}
+            ${row('Heading',  ac.heading != null ? ac.heading + '°' : '')}
+            ${row('Squawk',   ac.squawk)}
+            ${row('COM 1',    ac.com1)}
+            ${row('COM 2',    ac.com2)}
+            ${row('Gear',     ac.gear    ? 'down' : '')}
+            ${row('Flaps',    ac.flaps   ? Math.round(ac.flaps * 100) + '%' : '')}
+            ${row('Lights',   lights)}
+            ${row('Engines',  engines)}
+            ${row('Rotor',    ac.rotorRpm > 0 ? Math.round(ac.rotorRpm) + ' rpm' : '')}
+          </table>
+          ${ac.route   ? `<div style="font-size:11px;color:${sub};margin-top:4px">${ac.route}</div>` : ''}
+          ${ac.remarks ? `<div style="font-size:11px;color:${sub}">${ac.remarks}</div>` : ''}
+          <div style="margin-top:8px;padding-top:6px;border-top:1px solid ${divider}">
+            <a href="#" data-joinfs-follow="${ac.callsign}"
+               style="display:inline-flex;align-items:center;gap:5px;
+                      color:${followed ? '#ef4444' : color};
+                      font-size:12px;font-weight:600;text-decoration:none;">
+              ${followed
+                ? `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="4" width="16" height="16" rx="2"/></svg> Stop following`
+                : `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5,3 19,12 5,21"/></svg> Follow on map`}
+            </a>
+          </div>
+        </div>`;
+    }
+  }
+
+  customElements.define('joinfs-map', JoinFsMap);
+})();

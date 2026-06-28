@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JoinFS Map</title>
+  <style>
+
+    /* ── Theme tokens ───────────────────────────────────────────────────── */
+    :root {
+      --bg:         #f1f5f9;
+      --surface:    #ffffff;
+      --border:     #e2e8f0;
+      --text:       #1e293b;
+      --text-muted: #64748b;
+      --accent:     #2563eb;
+      --btn-bg:     #ffffff;
+      --btn-hover:  #f1f5f9;
+      --btn-border: #cbd5e1;
+      --shadow:     rgba(0,0,0,.08);
+    }
+
+    /* Auto dark — kicks in when no explicit [data-theme] is set */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme]) {
+        --bg:         #0f172a;
+        --surface:    #1e293b;
+        --border:     #334155;
+        --text:       #e2e8f0;
+        --text-muted: #94a3b8;
+        --accent:     #60a5fa;
+        --btn-bg:     #1e293b;
+        --btn-hover:  #334155;
+        --btn-border: #475569;
+        --shadow:     rgba(0,0,0,.4);
+      }
+    }
+
+    /* Explicit dark override */
+    [data-theme="dark"] {
+      --bg:         #0f172a;
+      --surface:    #1e293b;
+      --border:     #334155;
+      --text:       #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent:     #60a5fa;
+      --btn-bg:     #1e293b;
+      --btn-hover:  #334155;
+      --btn-border: #475569;
+      --shadow:     rgba(0,0,0,.4);
+    }
+
+    /* Explicit light override */
+    [data-theme="light"] {
+      --bg:         #f1f5f9;
+      --surface:    #ffffff;
+      --border:     #e2e8f0;
+      --text:       #1e293b;
+      --text-muted: #64748b;
+      --accent:     #2563eb;
+      --btn-bg:     #ffffff;
+      --btn-hover:  #f1f5f9;
+      --btn-border: #cbd5e1;
+      --shadow:     rgba(0,0,0,.08);
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, sans-serif;
+      transition: background .25s, color .25s;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px;
+      height: 48px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 4px var(--shadow);
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -.01em;
+    }
+
+    header h1 span { color: var(--accent); }
+
+    /* ── Theme toggle ───────────────────────────────────────────────────── */
+    #theme-toggle {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      background: var(--btn-bg);
+      color: var(--text);
+      border: 1px solid var(--btn-border);
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
+    }
+
+    #theme-toggle:hover { background: var(--btn-hover); }
+
+    #theme-toggle svg {
+      width: 15px; height: 15px;
+      flex-shrink: 0;
+    }
+
+    /* ── Legend ─────────────────────────────────────────────────────────── */
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 4px 14px;
+      flex-wrap: wrap;
+      padding: 5px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .legend-label {
+      font-weight: 600;
+      color: var(--text);
+      margin-right: 4px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── Map ────────────────────────────────────────────────────────────── */
+    joinfs-map {
+      flex: 1;
+      min-height: 0;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>✈ <span>JoinFS</span> Map</h1>
+
+  <button id="theme-toggle" type="button" aria-label="Toggle dark/light mode">
+    <!-- icon swapped by JS -->
+  </button>
+</header>
+
+<joinfs-map
+  id="map"
+  uri="ws://167.233.145.232:8765/ws/"
+  stale-timeout="60"
+  lat="51.0"
+  lon="10.0"
+  zoom="6">
+</joinfs-map>
+
+<script src="../joinfs-map.js"></script>
+<script>
+  const html   = document.documentElement;
+  const mapEl  = document.getElementById('map');
+  const btn    = document.getElementById('theme-toggle');
+
+  const ICON_MOON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+  </svg>`;
+  const ICON_SUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="5"/>
+    <line x1="12" y1="1"  x2="12" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="23"/>
+    <line x1="4.22" y1="4.22"  x2="5.64" y2="5.64"/>
+    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+    <line x1="1"  y1="12" x2="3"  y2="12"/>
+    <line x1="21" y1="12" x2="23" y2="12"/>
+    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+  </svg>`;
+
+  function isDark() {
+    const explicit = html.dataset.theme;
+    if (explicit) return explicit === 'dark';
+    return matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+
+  function syncUI() {
+    const dark = isDark();
+    mapEl.setAttribute('theme', dark ? 'dark' : 'light');
+    btn.innerHTML = dark
+      ? ICON_SUN  + ' Light mode'
+      : ICON_MOON + ' Dark mode';
+  }
+
+  btn.addEventListener('click', () => {
+    html.dataset.theme = isDark() ? 'light' : 'dark';
+    syncUI();
+  });
+
+  // React to OS preference changes when no explicit override is set
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (!html.dataset.theme) syncUI();
+  });
+
+  syncUI();
+
+  // ── Query string parameters ───────────────────────────────────────────────
+  const params   = new URLSearchParams(location.search);
+
+  // ?callsign=DLH123 or ?pilot=Joe — follow an aircraft
+  const followCs = params.get('callsign') || params.get('pilot');
+  if (followCs) mapEl.setAttribute('follow', followCs);
+
+  // ?iconsize=3 or ?icon-size=7 — scale icons (0–10, default 5)
+  const iconSize = params.get('iconsize') ?? params.get('icon-size');
+  if (iconSize !== null) mapEl.setAttribute('icon-size', iconSize);
+
+  // When a Follow/Unfollow action occurs inside the component, mirror it to the URL
+  mapEl.addEventListener('joinfs-follow', e => {
+    const cs = e.detail?.callsign;
+    const url = new URL(location.href);
+    url.search = '';
+    if (cs) url.searchParams.set('callsign', cs);
+    history.replaceState(null, '', url.toString());
+  });
+</script>
+
+</body>
+</html>

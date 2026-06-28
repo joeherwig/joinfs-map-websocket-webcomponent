@@ -154,6 +154,27 @@
     return `hsl(${Math.round(hue)},88%,44%)`;
   }
 
+  // ── Trail helpers ─────────────────────────────────────────────────────────
+
+  function headingDiff(a, b) {
+    const d = ((b - a) % 360 + 360) % 360;
+    return d > 180 ? d - 360 : d;
+  }
+
+  function _lsKey(key)  { return 'joinfs-trail-' + key; }
+
+  function _loadTrailData(key) {
+    try {
+      const raw = localStorage.getItem(_lsKey(key));
+      if (raw) { const d = JSON.parse(raw); return { show: !!d.show, pts: d.pts || [] }; }
+    } catch {}
+    return { show: false, pts: [] };
+  }
+
+  function _saveTrailData(key, show, pts) {
+    try { localStorage.setItem(_lsKey(key), JSON.stringify({ show, pts })); } catch {}
+  }
+
   // ── Icon helpers ──────────────────────────────────────────────────────────
 
   // Map icon-size attr (0–10) to pixels: 0→40 px, 5→80 px, 10→120 px
@@ -358,6 +379,28 @@
           this.removeAttribute('follow');
           this._dispatch('joinfs-follow', { callsign: null });
         }
+
+        const trailBtn      = e.target.closest('[data-joinfs-trail]');
+        const trailClearBtn = e.target.closest('[data-joinfs-trail-clear]');
+
+        if (trailBtn) {
+          e.preventDefault();
+          const cs = trailBtn.dataset.joinfsTrail;
+          for (const [k, en] of this._markers) {
+            if ((en.ac.callsign || '') === cs) {
+              en.trailShow ? this._hideTrail(k, en) : this._showTrail(k, en);
+              break;
+            }
+          }
+        }
+
+        if (trailClearBtn) {
+          e.preventDefault();
+          const cs = trailClearBtn.dataset.joinfsTrailClear;
+          for (const [k, en] of this._markers) {
+            if ((en.ac.callsign || '') === cs) { this._clearTrail(k, en); break; }
+          }
+        }
       });
 
       this._staleTimer = setInterval(() => this._purgeStale(), 15_000);
@@ -495,17 +538,22 @@
         if (entry.marker.isPopupOpen())
           entry.marker.getPopup().setContent(this._popupHtml(ac));
       } else {
-        const entry = { ac, lastSeen: Date.now(), marker: null, svgText: null };
+        const stored = _loadTrailData(key);
+        const entry = { ac, lastSeen: Date.now(), marker: null, svgText: null,
+                        trailShow: stored.show, trail: stored.pts, trailLayer: null };
         const marker = L.marker(ll, { icon: makeDotIcon(L, color, size) })
           .addTo(this._map)
           .bindPopup(() => this._popupHtml(entry.ac), { maxWidth: 300 });
         entry.marker = marker;
         this._markers.set(key, entry);
+        if (stored.show) this._rebuildTrailLayer(entry);
       }
 
       if (this._matchesFollow(ac)) {
         this._map.panTo(ll, { animate: true });
       }
+
+      this._appendTrailPoint(key, this._markers.get(key), ac);
 
       // Async SVG upgrade: try exact ICAO filename, then category fallback
       const filename = getSvgFilename(ac.icaoType);
@@ -529,6 +577,7 @@
       for (const [key, entry] of this._markers) {
         if (entry.lastSeen < cutoff) {
           entry.marker.remove();
+          if (entry.trailLayer) { entry.trailLayer.remove(); }
           this._markers.delete(key);
         }
       }
@@ -548,6 +597,68 @@
       }
     }
 
+    // ── trails ────────────────────────────────────────────────────────────
+
+    _shouldSavePoint(trail, ac) {
+      if (trail.length === 0) return true;
+      const last = trail[trail.length - 1];
+      if (Math.abs(headingDiff(last.hdg, ac.heading)) > 5) return true;
+      if (altColor(last.alt) !== altColor(ac.altitude)) return true;
+      return false;
+    }
+
+    _appendTrailPoint(key, entry, ac) {
+      if (!this._shouldSavePoint(entry.trail, ac)) return;
+      const pt = { lat: ac.latitude, lon: ac.longitude, alt: ac.altitude, hdg: ac.heading };
+      entry.trail.push(pt);
+      if (entry.trail.length > 1000) entry.trail.shift();
+
+      if (entry.trailShow && entry.trail.length >= 2 && entry.trailLayer) {
+        const prev = entry.trail[entry.trail.length - 2];
+        this._L.polyline(
+          [[prev.lat, prev.lon], [pt.lat, pt.lon]],
+          { color: altColor(prev.alt), weight: 3, opacity: 0.75, lineJoin: 'round' }
+        ).addTo(entry.trailLayer);
+      }
+
+      _saveTrailData(key, entry.trailShow, entry.trail);
+    }
+
+    _rebuildTrailLayer(entry) {
+      if (entry.trailLayer) { entry.trailLayer.remove(); entry.trailLayer = null; }
+      if (!entry.trailShow || !this._L || !this._map) return;
+      entry.trailLayer = this._L.layerGroup().addTo(this._map);
+      for (let i = 1; i < entry.trail.length; i++) {
+        const p0 = entry.trail[i - 1], p1 = entry.trail[i];
+        this._L.polyline(
+          [[p0.lat, p0.lon], [p1.lat, p1.lon]],
+          { color: altColor(p0.alt), weight: 3, opacity: 0.75, lineJoin: 'round' }
+        ).addTo(entry.trailLayer);
+      }
+    }
+
+    _showTrail(key, entry) {
+      entry.trailShow = true;
+      this._rebuildTrailLayer(entry);
+      _saveTrailData(key, true, entry.trail);
+      if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
+    }
+
+    _hideTrail(key, entry) {
+      entry.trailShow = false;
+      if (entry.trailLayer) { entry.trailLayer.remove(); entry.trailLayer = null; }
+      _saveTrailData(key, false, entry.trail);
+      if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
+    }
+
+    _clearTrail(key, entry) {
+      entry.trailShow = false;
+      entry.trail     = [];
+      if (entry.trailLayer) { entry.trailLayer.remove(); entry.trailLayer = null; }
+      try { localStorage.removeItem(_lsKey(key)); } catch {}
+      if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
+    }
+
     // ── popup HTML ────────────────────────────────────────────────────────
 
     _popupHtml(ac) {
@@ -557,9 +668,11 @@
       const muted   = dark ? '#94a3b8' : '#6b7280';
       const sub     = dark ? '#64748b' : '#9ca3af';
       const divider = dark ? '#334155' : '#e5e7eb';
-      const typeCode = normalizeType(ac.icaoType);
-      const color    = altColor(ac.altitude);
-      const followed = this._matchesFollow(ac);
+      const typeCode   = normalizeType(ac.icaoType);
+      const color      = altColor(ac.altitude);
+      const followed   = this._matchesFollow(ac);
+      const trailKey   = ac.guid || ac.callsign;
+      const trailEntry = this._markers.get(trailKey) || null;
 
       const row = (lbl, val) =>
         (val != null && val !== '' && val !== '0' && val !== 0)
@@ -598,7 +711,7 @@
           </table>
           ${ac.route   ? `<div style="font-size:11px;color:${sub};margin-top:4px">${ac.route}</div>` : ''}
           ${ac.remarks ? `<div style="font-size:11px;color:${sub}">${ac.remarks}</div>` : ''}
-          <div style="margin-top:8px;padding-top:6px;border-top:1px solid ${divider}">
+          <div style="margin-top:8px;padding-top:6px;border-top:1px solid ${divider};display:flex;flex-direction:column;gap:5px">
             <a href="#" data-joinfs-follow="${ac.callsign}"
                style="display:inline-flex;align-items:center;gap:5px;
                       color:${followed ? '#ef4444' : color};
@@ -607,6 +720,26 @@
                 ? `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="4" width="16" height="16" rx="2"/></svg> Stop following`
                 : `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5,3 19,12 5,21"/></svg> Follow on map`}
             </a>
+            <div style="display:flex;align-items:center;gap:10px">
+              <a href="#" data-joinfs-trail="${ac.callsign}"
+                 style="display:inline-flex;align-items:center;gap:5px;
+                        color:${trailEntry && trailEntry.trailShow ? '#f59e0b' : muted};
+                        font-size:12px;font-weight:600;text-decoration:none;">
+                ${trailEntry && trailEntry.trailShow
+                  ? `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Hide trail`
+                  : `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Show trail`}
+                ${trailEntry && trailEntry.trail.length > 0
+                  ? `<span style="font-weight:400;color:${muted}">(${trailEntry.trail.length} pts)</span>`
+                  : ''}
+              </a>
+              ${trailEntry && trailEntry.trail.length > 0
+                ? `<a href="#" data-joinfs-trail-clear="${ac.callsign}"
+                      style="display:inline-flex;align-items:center;gap:4px;
+                             color:#ef4444;font-size:12px;font-weight:600;text-decoration:none;">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg> Clear
+                   </a>`
+                : ''}
+            </div>
           </div>
         </div>`;
     }

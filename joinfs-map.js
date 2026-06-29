@@ -111,7 +111,7 @@
   function requireSvg(filename) {
     if (_svgCache.has(filename))   return Promise.resolve(_svgCache.get(filename));
     if (_svgLoading.has(filename)) return _svgLoading.get(filename);
-    const url = `https://cdn.jsdelivr.net/gh/RexKramer1/AircraftShapesSVG@main/Shapes%20SVG/${encodeURIComponent(filename)}`;
+    const url = `https://raw.githubusercontent.com/RexKramer1/AircraftShapesSVG/refs/heads/main/Shapes SVG/${encodeURIComponent(filename)}`;
     const p = fetch(url)
       .then(r => r.ok ? r.text() : null)
       .then(text => { if (text) _svgCache.set(filename, text); _svgLoading.delete(filename); return text; })
@@ -122,14 +122,14 @@
 
   // Category fallback filenames — one known SVG per category
   const CATEGORY_SVG = {
-    'large-jet':    'B738.svg',
+    'large-jet':    'A20N.svg',
     'regional-jet': 'CRJ9.svg',
     'turboprop':    'DH8D.svg',
     'ga':           'C172.svg',
-    'helicopter':   'R44.svg',
+    'helicopter':   'EC45.svg',
     'sailplane':    'ASK21.svg',
     'military':     'F16.svg',
-    'generic':      'C172.svg',
+    'generic':      'Unidentified.svg',
   };
 
   function getSvgFilename(icaoType) {
@@ -177,14 +177,38 @@
 
   // ── Icon helpers ──────────────────────────────────────────────────────────
 
-  // Map icon-size attr (0–10) to pixels: 0→40 px, 5→80 px, 10→120 px
-  function iconPx(sizeAttr) { return 40 + sizeAttr * 6; }
+  // Map icon-size attr (1–10) to pixels: 1→92 px, 5→140 px, 10→200 px
+  function iconPx(sizeAttr) { return 80 + sizeAttr * 12; }
 
-  function makeIcon(L, heading, svgText, color, sizeAttr) {
+  // Layers to colorize (by inkscape:label, lowercased)
+  const COLORED_LABELS = new Set(['pfade', 'shape', 'outline', 'path', 'accent']);
+
+  const _INKSCAPE_NS = 'http://www.inkscape.org/namespaces/inkscape';
+
+  function colorSvg(svgText, fillColor, strokeColor, strokeWidth) {
+    const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+    for (const g of doc.getElementsByTagName('g')) {
+      // inkscape:label is a namespace-prefixed XML attribute — CSS attribute
+      // selectors can't match it, so read it directly via getAttribute / getAttributeNS
+      const label = (g.getAttributeNS(_INKSCAPE_NS, 'label') ||
+                     g.getAttribute('inkscape:label') || '').toLowerCase();
+      if (!COLORED_LABELS.has(label)) continue;
+      for (const el of g.querySelectorAll('path,circle,ellipse,rect,polygon,polyline')) {
+        let s = el.getAttribute('style') || '';
+        s = s.replace(/\bfill\s*:[^;]+/, `fill:${fillColor}`);
+        s = s.replace(/\bstroke\s*:[^;]+/, `stroke:${strokeColor}`);
+        if (strokeWidth != null)
+          s = s.replace(/\bstroke-width\s*:[^;]+/, `stroke-width:${strokeWidth}`);
+        el.setAttribute('style', s);
+      }
+    }
+    return new XMLSerializer().serializeToString(doc);
+  }
+
+  function makeIcon(L, heading, svgText, color, sizeAttr, strokeColor, strokeWidth) {
     const px = iconPx(sizeAttr);
-    // Replace fill color, resize SVG element, inject rotation + drop-shadow
-    const html = svgText
-      .replace(/#000000/gi, color)
+    const colored = colorSvg(svgText, color, strokeColor ?? '#000000', strokeWidth ?? null);
+    const html = colored
       .replace(/<svg\b([^>]*)>/,
         (_, attrs) => `<svg${attrs
           .replace(/\swidth="[^"]*"/g, '')
@@ -277,7 +301,7 @@
 
   // ── Custom element ────────────────────────────────────────────────────────
   class JoinFsMap extends HTMLElement {
-    static get observedAttributes() { return ['uri', 'stale-timeout', 'theme', 'follow', 'icon-size']; }
+    static get observedAttributes() { return ['uri', 'stale-timeout', 'theme', 'follow', 'icon-size', 'icon-stroke-width']; }
 
     constructor() {
       super();
@@ -291,6 +315,7 @@
       this._mq             = null;
       this._mqListener     = null;
       this._isDark         = false;
+      this._strokeWidth    = null;
       this._ws             = null;
       this._reconnectTimer = null;
       this._staleTimer     = null;
@@ -304,11 +329,15 @@
       this._teardown();
     }
 
-    attributeChangedCallback(name) {
+    attributeChangedCallback(name, _old, newVal) {
       if (name === 'uri' && this._ws) { this._teardown(); this._connect(); }
       if (name === 'theme')           { this._applyTheme(); }
       if (name === 'follow')          { this._applyFollow(); }
       if (name === 'icon-size')       { this._refreshAllIcons(); }
+      if (name === 'icon-stroke-width') {
+        this._strokeWidth = newVal || null;
+        this._refreshAllIcons();
+      }
     }
 
     // ── attribute getters ─────────────────────────────────────────────────
@@ -329,7 +358,7 @@
     // icon-size: 0–10, default 5
     get _iconSize() {
       const v = parseInt(this.getAttribute('icon-size'), 10);
-      return Math.min(10, Math.max(0, Number.isFinite(v) ? v : 5));
+      return Math.min(10, Math.max(1, Number.isFinite(v) ? v : 5));
     }
 
     // ── init ──────────────────────────────────────────────────────────────
@@ -430,6 +459,7 @@
       this._swapTileLayer();
       if (this._themeStyle)
         this._themeStyle.textContent = this._isDark ? DARK_POPUP_CSS : '';
+      this._refreshAllIcons();
     }
 
     _swapTileLayer() {
@@ -532,7 +562,8 @@
         entry.ac       = ac;
         entry.lastSeen = Date.now();
         const icon = entry.svgText
-          ? makeIcon(L, ac.heading, entry.svgText, color, size)
+          ? makeIcon(L, ac.heading, entry.svgText, color, size,
+                     this._isDark ? '#ffffff' : '#000000', this._strokeWidth)
           : makeDotIcon(L, color, size);
         entry.marker.setLatLng(ll).setIcon(icon);
         if (entry.marker.isPopupOpen())
@@ -566,7 +597,8 @@
             if (!entry) return;
             entry.svgText = svgText;
             entry.marker.setIcon(
-              makeIcon(L, entry.ac.heading, svgText, altColor(entry.ac.altitude), this._iconSize)
+              makeIcon(L, entry.ac.heading, svgText, altColor(entry.ac.altitude), this._iconSize,
+                       this._isDark ? '#ffffff' : '#000000', this._strokeWidth)
             );
           });
       }
@@ -591,7 +623,8 @@
         const size  = this._iconSize;
         entry.marker.setIcon(
           entry.svgText
-            ? makeIcon(this._L, entry.ac.heading, entry.svgText, color, size)
+            ? makeIcon(this._L, entry.ac.heading, entry.svgText, color, size,
+                       this._isDark ? '#ffffff' : '#000000', this._strokeWidth)
             : makeDotIcon(this._L, color, size)
         );
       }

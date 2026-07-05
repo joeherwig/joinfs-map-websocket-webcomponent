@@ -111,7 +111,7 @@
   function requireSvg(filename) {
     if (_svgCache.has(filename))   return Promise.resolve(_svgCache.get(filename));
     if (_svgLoading.has(filename)) return _svgLoading.get(filename);
-    const url = `https://raw.githubusercontent.com/RexKramer1/AircraftShapesSVG/refs/heads/main/Shapes SVG/${encodeURIComponent(filename)}`;
+    const url = `https://raw.githubusercontent.com/joeherwig/AircraftIconsSVG/refs/heads/main/Shapes SVG/${encodeURIComponent(filename)}`;
     const p = fetch(url)
       .then(r => r.ok ? r.text() : null)
       .then(text => { if (text) _svgCache.set(filename, text); _svgLoading.delete(filename); return text; })
@@ -178,7 +178,7 @@
   // ── Icon helpers ──────────────────────────────────────────────────────────
 
   // Map icon-size attr (1–10) to pixels: 1→92 px, 5→140 px, 10→200 px
-  function iconPx(sizeAttr) { return 80 + sizeAttr * 12; }
+  function iconPx(sizeAttr) { return 40 + sizeAttr * 1; }
 
   // Layers to colorize (by inkscape:label, lowercased)
   const COLORED_LABELS = new Set(['pfade', 'shape', 'outline', 'path', 'accent']);

@@ -55,7 +55,7 @@
   function normalizeType(icaoType) {
     if (!icaoType) return '';
     return icaoType
-      .replace(/^ATCCOM\.AC_MODEL_(.+?)(?:\.\d+\.(?:tts|text))?$/, '$1')
+      .replace(/^ATCCOM\.AC_MODEL(_| )(.+?)(?:\.\d+\.(?:tts|text))?$/, '$2')
       .toUpperCase().trim();
   }
 

@@ -161,6 +161,14 @@ document.querySelector('joinfs-map').addEventListener('joinfs-follow', e => {
 
 ---
 
+## minimal example
+
+using the default values except of the wss url
+```
+<joinfs-map uri="wss://yourjoinfsserver/ws/"></joinfs-map>
+<script src="joinfs-map.js"></script>
+```
+
 ## How it works
 
 JoinFS broadcasts delta JSON messages over WebSocket:
@@ -211,10 +219,27 @@ If you run your joinfs-console server available in the public internet as hub an
 
 Any modern browser with Custom Elements v1, Shadow DOM, and dynamic `import()`. Chrome 67+, Firefox 63+, Safari 14+, Edge 79+.
 
-# minimal example
+---
 
-using the default values except of the wss url
-```
-<joinfs-map uri="wss://yourjoinfsserver/ws/"></joinfs-map>
-<script src="joinfs-map.js"></script>
-```
+## Contributing
+
+Bug fixes, new aircraft icon mappings, and feature suggestions are welcome.
+
+1. Fork the repo: [joeherwig/joinfs-map-websocket-webcomponent](https://github.com/joeherwig/joinfs-map-websocket-webcomponent)
+2. Create a branch off `main` named for what it does:
+   ```bash
+   git checkout -b fix/trail-live-segment
+   ```
+3. Make your changes. This project is a single-file, zero-dependency web component — keep it that way; avoid introducing a build step or external runtime dependencies.
+4. Test your changes by opening [`example/index.html`](example/index.html) in a browser against a running JoinFS WebSocket server (or a mock one).
+5. Commit with a clear message describing *why*, not just *what*, and push your branch to your fork.
+6. Open a Pull Request against `main` on the upstream repo. Describe what changed, why, and how you tested it.
+
+For larger changes, consider opening an issue first to discuss the approach before investing time in a PR.
+
+---
+
+## License
+
+This project is licensed under [CC BY-NC-SA 4.0](LICENSE) (Attribution-NonCommercial-ShareAlike). You're free to use, modify, and share it — including adaptations — for non-commercial purposes, as long as you give credit and share any adaptations under the same license. See the [LICENSE](LICENSE) file for the full legal text.
+

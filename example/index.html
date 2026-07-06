@@ -178,11 +178,11 @@
 
 <joinfs-map
   id="map"
-  uri="wss://joinfs.yoursite.com/ws/"
+  uri="wss://joinfs.yourserver.com/ws/"
   stale-timeout="60"
-  lat="51.0"
-  lon="10.0"
-  zoom="6">
+  lat="48.0"
+  lon="9.0"
+  zoom="3">
 </joinfs-map>
 
 <script src="../joinfs-map.js"></script>
@@ -230,10 +230,15 @@
     if (!html.dataset.theme) syncUI();
   });
 
-  syncUI();
-
   // ── Query string parameters ───────────────────────────────────────────────
   const params   = new URLSearchParams(location.search);
+
+  // ?theme=dark or ?theme=light — force a theme, overriding the OS preference
+  // (still overridable afterwards via the toggle button)
+  const themeParam = params.get('theme');
+  if (themeParam === 'dark' || themeParam === 'light') html.dataset.theme = themeParam;
+
+  syncUI();
 
   // ?callsign=DLH123 or ?pilot=Joe — follow an aircraft
   const followCs = params.get('callsign') || params.get('pilot');

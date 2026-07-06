@@ -2,12 +2,14 @@
 
 A self-contained, zero-dependency web component that displays live aircraft positions on an interactive [Leaflet](https://leafletjs.com) map, fed by a [JoinFS](https://www.fs-hub.com/joinfs) WebSocket server.
 
+![image](example/example.jpg)
+
 **Features**
 
 - Drop-in single-file component — no npm, no bundler, no configuration
 - Connects to a JoinFS WebSocket server and renders aircraft in real time
-- Aircraft icons loaded from [RexKramer1/AircraftShapesSVG](https://github.com/RexKramer1/AircraftShapesSVG) — real silhouettes per aircraft type
-- Colors reflect altitude (ADSBExchange style: orange → green → magenta)
+- Aircraft icons loaded from [joeherwig/AircraftIconsSVG](https://github.com/joeherwig/AircraftIconsSVG) — real silhouettes per aircraft type
+- Colors reflect altitude (ADSBExchange style: orange → green → blue → magenta)
 - Dark / light / auto theming with live tile-layer switching
 - Follow an aircraft by callsign or pilot name — via attribute or URL query string
 - Popup with full flight-plan data (type, route, altitude, speed, COM, squawk, lights, engines…)
@@ -121,7 +123,7 @@ A ready-to-use fullscreen demo with dark/light toggle and URL-based follow suppo
 
 | Attribute | Type | Default | Description |
 |---|---|---|---|
-| `uri` | string | `ws://localhost:8765/ws/` | Full WebSocket URI including protocol, host, port and path. Supports optional query parameters. |
+| `uri` | string | `ws://localhost/ws/` | Full WebSocket URI including protocol, host, port and path. Supports optional query parameters. |
 | `lat` | number | `51.0` | Initial map centre latitude. |
 | `lon` | number | `10.0` | Initial map centre longitude. |
 | `zoom` | integer | `6` | Initial Leaflet zoom level (0 – 19). |
@@ -154,7 +156,7 @@ document.querySelector('joinfs-map').addEventListener('joinfs-follow', e => {
 |---|---|---|
 | `?callsign=` | `?callsign=DLH123` | Start following this callsign |
 | `?pilot=` | `?pilot=Joe` | Start following this pilot name |
-| `?iconsize=` | `?iconsize=3` | Set icon size (0–10) |
+| `?iconsize=` | `?iconsize=3` | Set icon size (0–10) if you prefer smaller or larger icons|
 | `?icon-size=` | `?icon-size=8` | Alias for `?iconsize=` |
 
 ---
@@ -181,9 +183,9 @@ JoinFS broadcasts delta JSON messages over WebSocket:
 The component:
 
 1. Connects to the WebSocket URI and listens for `aircraft_update` messages.
-2. For each aircraft, a dot marker is placed immediately. Then the matching SVG silhouette is fetched from [jsDelivr CDN](https://cdn.jsdelivr.net/gh/RexKramer1/AircraftShapesSVG@main/Shapes%20SVG/) and the icon upgrades asynchronously. SVGs are cached in memory after the first fetch.
+2. For each aircraft, a dot marker is placed immediately. Then the matching SVG silhouette is fetched and the icon upgrades asynchronously. SVGs are cached in memory after the first fetch.
 3. Icon fill colour is determined by altitude using the ADSBExchange scheme: orange at low altitude, green at cruise, magenta above FL400.
-4. Aircraft not updated within `stale-timeout` seconds are removed.
+4. Aircraft not updated via websocket within `stale-timeout` seconds are removed, to ensure disconnected pilots are removed from the map.
 5. On disconnect the component retries automatically every 4 seconds.
 
 ---
@@ -201,8 +203,18 @@ For remote access (not just localhost), run JoinFS as Administrator or add a URL
 netsh http add urlacl url=http://+:8765/ws/ user=Everyone
 ```
 
+If you run your joinfs-console server available in the public internet as hub and want to access the websocket server you might need to ensure that the map and the websocket server both use secure connections. A ws (not TLS encrypted) websockket connection will be blocked by browsers if embedded in a website delivered via HTTPS (secured). That's a security feature that needs to be respected during setup.
+
 ---
 
 ## Browser support
 
 Any modern browser with Custom Elements v1, Shadow DOM, and dynamic `import()`. Chrome 67+, Firefox 63+, Safari 14+, Edge 79+.
+
+# minimal example
+
+using the default values except of the wss url
+```
+<joinfs-map uri="wss://yourjoinfsserver/ws/"></joinfs-map>
+<script src="joinfs-map.js"></script>
+```

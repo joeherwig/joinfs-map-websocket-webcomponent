@@ -265,9 +265,14 @@
       }
       #ws-status {
         top: 8px; right: 8px;
+        box-sizing: border-box;
+        overflow: hidden;
+        white-space: nowrap;
+        max-width: 480px;
+        transition: background .3s, max-width .3s ease;
       }
       #ws-status.connecting   { background: rgba(150,90,0,.8); }
-      #ws-status.connected    { background: rgba(0,110,0,.8); }
+      #ws-status.connected    { background: rgba(0,110,0,.8); max-width: 46px; }
       #ws-status.disconnected { background: rgba(170,0,0,.8); }
 
       #follow-status {
@@ -279,6 +284,7 @@
         pointer-events: all;
       }
       #follow-status[hidden] { display: none; }
+      #follow-label { text-transform: uppercase; }
       #follow-status button {
         background: none;
         border: none;
@@ -343,7 +349,7 @@
     // ── attribute getters ─────────────────────────────────────────────────
 
     get _uri() {
-      return this.getAttribute('uri') || 'ws://localhost:8765/ws/';
+      return this.getAttribute('uri') || 'ws://localhost/ws/';
     }
 
     get _staleMs() {
@@ -432,6 +438,13 @@
         }
       });
 
+      this.shadowRoot.querySelector('#follow-status [data-joinfs-unfollow]')
+        .addEventListener('click', e => {
+          e.preventDefault();
+          this.removeAttribute('follow');
+          this._dispatch('joinfs-follow', { callsign: null });
+        });
+
       this._staleTimer = setInterval(() => this._purgeStale(), 15_000);
 
       if (this._follow) this._applyFollow();
@@ -506,13 +519,13 @@
 
     _connect() {
       const uri = this._uri;
-      this._setStatus('connecting', 'connecting…');
+      this._setStatus('connecting', uri);
       let ws;
       try { ws = new WebSocket(uri); }
       catch { this._scheduleReconnect(); return; }
       this._ws = ws;
-      ws.onopen    = () => this._setStatus('connected', `● ${uri}`);
-      ws.onclose   = () => { this._setStatus('disconnected', 'disconnected — retrying…'); this._scheduleReconnect(); };
+      ws.onopen    = () => this._setStatus('connected', uri.startsWith('wss:') ? 'wss' : 'ws');
+      ws.onclose   = () => { this._setStatus('disconnected', uri); this._scheduleReconnect(); };
       ws.onerror   = () => { /* onclose always follows */ };
       ws.onmessage = ({ data }) => { try { this._onMessage(JSON.parse(data)); } catch {} };
     }

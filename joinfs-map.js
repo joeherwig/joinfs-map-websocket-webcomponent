@@ -571,7 +571,7 @@
       } else {
         const stored = _loadTrailData(key);
         const entry = { ac, lastSeen: Date.now(), marker: null, svgText: null,
-                        trailShow: stored.show, trail: stored.pts, trailLayer: null };
+                        trailShow: stored.show, trail: stored.pts, trailLayer: null, liveLine: null };
         const marker = L.marker(ll, { icon: makeDotIcon(L, color, size) })
           .addTo(this._map)
           .bindPopup(() => this._popupHtml(entry.ac), { maxWidth: 300 });
@@ -585,6 +585,7 @@
       }
 
       this._appendTrailPoint(key, this._markers.get(key), ac);
+      this._updateLiveSegment(this._markers.get(key), ac);
 
       // Async SVG upgrade: try exact ICAO filename, then category fallback
       const filename = getSvgFilename(ac.icaoType);
@@ -657,8 +658,25 @@
       _saveTrailData(key, entry.trailShow, entry.trail);
     }
 
+    _updateLiveSegment(entry, ac) {
+      if (!entry.trailShow || !entry.trailLayer || entry.trail.length === 0) {
+        if (entry.liveLine) { entry.liveLine.remove(); entry.liveLine = null; }
+        return;
+      }
+      const last = entry.trail[entry.trail.length - 1];
+      const latlngs = [[last.lat, last.lon], [ac.latitude, ac.longitude]];
+      if (entry.liveLine) {
+        entry.liveLine.setLatLngs(latlngs).setStyle({ color: altColor(last.alt) });
+      } else {
+        entry.liveLine = this._L.polyline(latlngs,
+          { color: altColor(last.alt), weight: 3, opacity: 0.75, lineJoin: 'round' }
+        ).addTo(entry.trailLayer);
+      }
+    }
+
     _rebuildTrailLayer(entry) {
       if (entry.trailLayer) { entry.trailLayer.remove(); entry.trailLayer = null; }
+      entry.liveLine = null;
       if (!entry.trailShow || !this._L || !this._map) return;
       entry.trailLayer = this._L.layerGroup().addTo(this._map);
       for (let i = 1; i < entry.trail.length; i++) {
@@ -680,6 +698,7 @@
     _hideTrail(key, entry) {
       entry.trailShow = false;
       if (entry.trailLayer) { entry.trailLayer.remove(); entry.trailLayer = null; }
+      entry.liveLine = null;
       _saveTrailData(key, false, entry.trail);
       if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
     }

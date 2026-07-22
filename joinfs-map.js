@@ -187,6 +187,13 @@
 
   function colorSvg(svgText, fillColor, strokeColor, strokeWidth) {
     const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+    // strip any embedded <title> - the aircraft-shape SVGs carry a static one (e.g.
+    // "A320 neo") that the browser shows as a native tooltip on hover, but it can't
+    // reflect per-aircraft data. A dynamic Leaflet tooltip is bound on the marker
+    // instead (see _tooltipHtml), which would otherwise show alongside/underneath this.
+    for (const titleEl of Array.from(doc.getElementsByTagName('title'))) {
+      titleEl.remove();
+    }
     for (const g of doc.getElementsByTagName('g')) {
       // inkscape:label is a namespace-prefixed XML attribute — CSS attribute
       // selectors can't match it, so read it directly via getAttribute / getAttributeNS
@@ -509,9 +516,21 @@
 
       for (const [, entry] of this._markers) {
         if (this._matchesFollow(entry.ac)) {
-          this._map.panTo([entry.ac.latitude, entry.ac.longitude], { animate: true });
+          this._panFollowTarget(entry);
           break;
         }
+      }
+    }
+
+    // Recenter on a followed aircraft, then re-run the popup's own auto-pan if it's
+    // open - panTo puts the marker at the viewport's exact midpoint on every update,
+    // which can push an already-open (and possibly tall) popup out of view again.
+    // Leaflet only auto-pans for a popup when it first opens, not on later map moves
+    // triggered independently of that popup, so it has to be re-triggered explicitly.
+    _panFollowTarget(entry) {
+      this._map.panTo([entry.ac.latitude, entry.ac.longitude], { animate: true });
+      if (entry.marker && entry.marker.isPopupOpen()) {
+        entry.marker.openPopup();
       }
     }
 
@@ -581,20 +600,23 @@
         entry.marker.setLatLng(ll).setIcon(icon);
         if (entry.marker.isPopupOpen())
           entry.marker.getPopup().setContent(this._popupHtml(ac));
+        if (entry.marker.isTooltipOpen())
+          entry.marker.getTooltip().setContent(this._tooltipHtml(ac));
       } else {
         const stored = _loadTrailData(key);
         const entry = { ac, lastSeen: Date.now(), marker: null, svgText: null,
                         trailShow: stored.show, trail: stored.pts, trailLayer: null, liveLine: null };
         const marker = L.marker(ll, { icon: makeDotIcon(L, color, size) })
           .addTo(this._map)
-          .bindPopup(() => this._popupHtml(entry.ac), { maxWidth: 300 });
+          .bindPopup(() => this._popupHtml(entry.ac), { maxWidth: 300 })
+          .bindTooltip(() => this._tooltipHtml(entry.ac), { direction: 'top', offset: [0, -4] });
         entry.marker = marker;
         this._markers.set(key, entry);
         if (stored.show) this._rebuildTrailLayer(entry);
       }
 
       if (this._matchesFollow(ac)) {
-        this._map.panTo(ll, { animate: true });
+        this._panFollowTarget(this._markers.get(key));
       }
 
       this._appendTrailPoint(key, this._markers.get(key), ac);
@@ -724,6 +746,14 @@
       if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
     }
 
+    // ── hover tooltip HTML ───────────────────────────────────────────────
+
+    _tooltipHtml(ac) {
+      if (!ac) return '';
+      const typeCode = normalizeType(ac.icaoType);
+      return [ac.callsign, ac.nickname, typeCode].filter(Boolean).join(' • ');
+    }
+
     // ── popup HTML ────────────────────────────────────────────────────────
 
     _popupHtml(ac) {
@@ -761,6 +791,9 @@
           <table style="border-collapse:collapse;line-height:1.55">
             ${row('Pilot',    ac.nickname)}
             ${row('Route',    route)}
+            ${row('Airline',      ac.icaoAirline)}
+            ${row('Flight No.',   ac.flightNumber)}
+            ${row('Registration', ac.registration)}
             ${row('Rules',    ac.rules)}
             ${row('Altitude', ac.altitude   ? Number(ac.altitude).toLocaleString() + ' ft' : '')}
             ${row('Speed',    ac.speed      ? Math.round(ac.speed) + ' kts' : '')}
@@ -776,6 +809,7 @@
           </table>
           ${ac.route   ? `<div style="font-size:11px;color:${sub};margin-top:4px">${ac.route}</div>` : ''}
           ${ac.remarks ? `<div style="font-size:11px;color:${sub}">${ac.remarks}</div>` : ''}
+          ${ac.livery  ? `<div style="font-size:11px;color:${sub}">Livery: ${ac.livery}</div>` : ''}
           <div style="margin-top:8px;padding-top:6px;border-top:1px solid ${divider};display:flex;flex-direction:column;gap:5px">
             <a href="#" data-joinfs-follow="${ac.callsign}"
                style="display:inline-flex;align-items:center;gap:5px;

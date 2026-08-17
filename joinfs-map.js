@@ -111,7 +111,7 @@
   function requireSvg(filename) {
     if (_svgCache.has(filename))   return Promise.resolve(_svgCache.get(filename));
     if (_svgLoading.has(filename)) return _svgLoading.get(filename);
-    const url = `https://raw.githubusercontent.com/joeherwig/AircraftIconsSVG/refs/heads/main/Shapes SVG/${encodeURIComponent(filename)}`;
+    const url = `https://cdn.jsdelivr.net/gh/joeherwig/AircraftIconsSVG@main/Shapes%20SVG/${encodeURIComponent(filename)}`;
     const p = fetch(url)
       .then(r => r.ok ? r.text() : null)
       .then(text => { if (text) _svgCache.set(filename, text); _svgLoading.delete(filename); return text; })
@@ -161,18 +161,41 @@
     return d > 180 ? d - 360 : d;
   }
 
+  // JoinFS reports this fixed position (0°N 90.000323°E) whenever an aircraft's real
+  // position isn't known yet — not just before its first real fix, but any time
+  // mid-session too. Treat every occurrence as "no data this tick", never real data,
+  // or it draws a spurious line across the globe to/from it.
+  function isPlaceholderPosition(ac) {
+    return ac.latitude === 0 && Math.abs(ac.longitude - 90.000323) < 1e-6;
+  }
+
   function _lsKey(key)  { return 'joinfs-trail-' + key; }
 
   function _loadTrailData(key) {
     try {
       const raw = localStorage.getItem(_lsKey(key));
-      if (raw) { const d = JSON.parse(raw); return { show: !!d.show, pts: d.pts || [] }; }
+      if (raw) {
+        const d = JSON.parse(raw);
+        return {
+          show: !!d.show, pts: d.pts || [],
+          pilotName: d.pilotName || '', registration: d.registration || '',
+          startedAt: d.startedAt || null,
+        };
+      }
     } catch {}
-    return { show: false, pts: [] };
+    return { show: false, pts: [], pilotName: '', registration: '', startedAt: null };
   }
 
-  function _saveTrailData(key, show, pts) {
-    try { localStorage.setItem(_lsKey(key), JSON.stringify({ show, pts })); } catch {}
+  // meta identifies whose trail this is when inspecting localStorage directly —
+  // the storage key itself is just an opaque guid/callsign.
+  function _saveTrailData(key, show, pts, meta) {
+    try {
+      localStorage.setItem(_lsKey(key), JSON.stringify({
+        show, pts,
+        pilotName: meta.pilotName || '', registration: meta.registration || '',
+        startedAt: meta.startedAt || null,
+      }));
+    } catch {}
   }
 
   // ── Icon helpers ──────────────────────────────────────────────────────────
@@ -321,6 +344,7 @@
       this.attachShadow({ mode: 'open' });
       this.shadowRoot.appendChild(template.content.cloneNode(true));
       this._markers        = new Map();
+      this._pendingCleanup = new Map(); // key → timeout id, aircraft removed but grace period not elapsed
       this._L              = null;
       this._map            = null;
       this._tileLayer      = null;
@@ -557,6 +581,8 @@
     _teardown() {
       clearTimeout(this._reconnectTimer);
       clearInterval(this._staleTimer);
+      for (const timer of this._pendingCleanup.values()) clearTimeout(timer);
+      this._pendingCleanup.clear();
       if (this._mq && this._mqListener) {
         this._mq.removeEventListener('change', this._mqListener);
         this._mq = null; this._mqListener = null;
@@ -585,6 +611,17 @@
       if (!this._L || !this._map) return;
       const L     = this._L;
       const key   = ac.guid || ac.callsign;
+
+      if (isPlaceholderPosition(ac)) {
+        // JoinFS can send this fixed fix mid-session too (e.g. a momentary loss of
+        // position), not just before an aircraft's first real fix — ignore it
+        // entirely rather than moving the marker or recording a trail point, but
+        // keep the aircraft alive so _purgeStale doesn't drop it over one bad tick.
+        const existing = this._markers.get(key);
+        if (existing) existing.lastSeen = Date.now();
+        return;
+      }
+
       const ll    = [ac.latitude, ac.longitude];
       const color = altColor(ac.altitude);
       const size  = this._iconSize;
@@ -603,9 +640,14 @@
         if (entry.marker.isTooltipOpen())
           entry.marker.getTooltip().setContent(this._tooltipHtml(ac));
       } else {
+        if (this._pendingCleanup.has(key)) {
+          clearTimeout(this._pendingCleanup.get(key));
+          this._pendingCleanup.delete(key);
+        }
         const stored = _loadTrailData(key);
         const entry = { ac, lastSeen: Date.now(), marker: null, svgText: null,
-                        trailShow: stored.show, trail: stored.pts, trailLayer: null, liveLine: null };
+                        trailShow: stored.show, trail: stored.pts, trailLayer: null, liveLine: null,
+                        trailStartedAt: stored.startedAt || null };
         const marker = L.marker(ll, { icon: makeDotIcon(L, color, size) })
           .addTo(this._map)
           .bindPopup(() => this._popupHtml(entry.ac), { maxWidth: 300 })
@@ -647,8 +689,21 @@
           entry.marker.remove();
           if (entry.trailLayer) { entry.trailLayer.remove(); }
           this._markers.delete(key);
+          this._scheduleTrailCleanup(key);
         }
       }
+    }
+
+    // Delete a departed aircraft's stored trail after a grace period, unless it
+    // reappears (same guid/callsign) before the timer fires — see _updateAircraft.
+    _scheduleTrailCleanup(key) {
+      if (this._pendingCleanup.has(key)) clearTimeout(this._pendingCleanup.get(key));
+      const timer = setTimeout(() => {
+        this._pendingCleanup.delete(key);
+        if (this._markers.has(key)) return;
+        try { localStorage.removeItem(_lsKey(key)); } catch {}
+      }, 15 * 60 * 1000);
+      this._pendingCleanup.set(key, timer);
     }
 
     // Rebuild all marker icons when icon-size attribute changes
@@ -676,8 +731,18 @@
       return false;
     }
 
+    // pilotName/registration reflect the current aircraft; startedAt is fixed at
+    // the trail's first stored point so it reads as "when this trail began".
+    _trailMeta(entry) {
+      return {
+        pilotName: entry.ac.nickname || '', registration: entry.ac.registration || '',
+        startedAt: entry.trailStartedAt || null,
+      };
+    }
+
     _appendTrailPoint(key, entry, ac) {
       if (!this._shouldSavePoint(entry.trail, ac)) return;
+      if (!entry.trailStartedAt) entry.trailStartedAt = new Date().toISOString();
       const pt = { lat: ac.latitude, lon: ac.longitude, alt: ac.altitude, hdg: ac.heading };
       entry.trail.push(pt);
       if (entry.trail.length > 1000) entry.trail.shift();
@@ -690,7 +755,7 @@
         ).addTo(entry.trailLayer);
       }
 
-      _saveTrailData(key, entry.trailShow, entry.trail);
+      _saveTrailData(key, entry.trailShow, entry.trail, this._trailMeta(entry));
     }
 
     _updateLiveSegment(entry, ac) {
@@ -726,7 +791,7 @@
     _showTrail(key, entry) {
       entry.trailShow = true;
       this._rebuildTrailLayer(entry);
-      _saveTrailData(key, true, entry.trail);
+      _saveTrailData(key, true, entry.trail, this._trailMeta(entry));
       if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
     }
 
@@ -734,13 +799,14 @@
       entry.trailShow = false;
       if (entry.trailLayer) { entry.trailLayer.remove(); entry.trailLayer = null; }
       entry.liveLine = null;
-      _saveTrailData(key, false, entry.trail);
+      _saveTrailData(key, false, entry.trail, this._trailMeta(entry));
       if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
     }
 
     _clearTrail(key, entry) {
       entry.trailShow = false;
       entry.trail     = [];
+      entry.trailStartedAt = null;
       if (entry.trailLayer) { entry.trailLayer.remove(); entry.trailLayer = null; }
       try { localStorage.removeItem(_lsKey(key)); } catch {}
       if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));

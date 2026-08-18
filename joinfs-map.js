@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  // ── Leaflet loader — shared promise so CSS+JS are fetched only once ───────
+  // -- Leaflet loader � shared promise so CSS+JS are fetched only once -------
   let _leafletPromise = null;
   function loadLeaflet() {
     if (_leafletPromise) return _leafletPromise;
@@ -12,7 +12,7 @@
     return _leafletPromise;
   }
 
-  // ── Tile layer URLs ───────────────────────────────────────────────────────
+  // -- Tile layer URLs -------------------------------------------------------
   const TILES = {
     light: {
       url:         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -21,13 +21,13 @@
     },
     dark: {
       url:         'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors � <a href="https://carto.com/attributions">CARTO</a>',
       maxZoom:     20,
       subdomains:  'abcd',
     },
   };
 
-  // ── CSS injected into shadow root when dark mode is active ────────────────
+  // -- CSS injected into shadow root when dark mode is active ----------------
   const DARK_POPUP_CSS = `
     .leaflet-popup-content-wrapper,
     .leaflet-popup-tip {
@@ -48,10 +48,10 @@
     }
     .leaflet-control-attribution a { color: #60a5fa !important; }`;
 
-  // ── Normalise MSFS locPak key → plain ICAO designator ────────────────────
-  // "ATCCOM.AC_MODEL_B738.0.tts" → "B738"   (suffixed)
-  // "ATCCOM.AC_MODEL_A350"       → "A350"    (bare)
-  // "B738"                       → "B738"    (already plain)
+  // -- Normalise MSFS locPak key ? plain ICAO designator --------------------
+  // "ATCCOM.AC_MODEL_B738.0.tts" ? "B738"   (suffixed)
+  // "ATCCOM.AC_MODEL_A350"       ? "A350"    (bare)
+  // "B738"                       ? "B738"    (already plain)
   function normalizeType(icaoType) {
     if (!icaoType) return '';
     return icaoType
@@ -59,7 +59,7 @@
       .toUpperCase().trim();
   }
 
-  // ── Aircraft type classification from ICAO designator ────────────────────
+  // -- Aircraft type classification from ICAO designator --------------------
   function classifyType(icaoType) {
     if (!icaoType) return 'generic';
     const t = normalizeType(icaoType);
@@ -104,9 +104,9 @@
     return 'ga';
   }
 
-  // ── SVG cache for lazy-loaded aircraft shapes ─────────────────────────────
-  const _svgCache   = new Map(); // filename → svg text
-  const _svgLoading = new Map(); // filename → in-flight Promise (dedup concurrent fetches)
+  // -- SVG cache for lazy-loaded aircraft shapes -----------------------------
+  const _svgCache   = new Map(); // filename ? svg text
+  const _svgLoading = new Map(); // filename ? in-flight Promise (dedup concurrent fetches)
 
   function requireSvg(filename) {
     if (_svgCache.has(filename))   return Promise.resolve(_svgCache.get(filename));
@@ -120,7 +120,7 @@
     return p;
   }
 
-  // Category fallback filenames — one known SVG per category
+  // Category fallback filenames � one known SVG per category
   const CATEGORY_SVG = {
     'large-jet':    'A20N.svg',
     'regional-jet': 'CRJ9.svg',
@@ -141,7 +141,7 @@
     return CATEGORY_SVG[classifyType(icaoType)] || null;
   }
 
-  // ── Altitude-based color (ADSBExchange/tar1090 scheme) ───────────────────
+  // -- Altitude-based color (ADSBExchange/tar1090 scheme) -------------------
   function altColor(altFt) {
     if (altFt == null || altFt === '') return 'hsl(0,0%,75%)';
     const ft = Number(altFt);
@@ -154,15 +154,15 @@
     return `hsl(${Math.round(hue)},88%,44%)`;
   }
 
-  // ── Trail helpers ─────────────────────────────────────────────────────────
+  // -- Trail helpers ---------------------------------------------------------
 
   function headingDiff(a, b) {
     const d = ((b - a) % 360 + 360) % 360;
     return d > 180 ? d - 360 : d;
   }
 
-  // JoinFS reports this fixed position (0°N 90.000323°E) whenever an aircraft's real
-  // position isn't known yet — not just before its first real fix, but any time
+  // JoinFS reports this fixed position (0�N 90.000323�E) whenever an aircraft's real
+  // position isn't known yet � not just before its first real fix, but any time
   // mid-session too. Treat every occurrence as "no data this tick", never real data,
   // or it draws a spurious line across the globe to/from it.
   function isPlaceholderPosition(ac) {
@@ -190,7 +190,7 @@
     return { show: false, pts: [], pilotName: '', registration: '', startedAt: null };
   }
 
-  // meta identifies whose trail this is when inspecting localStorage directly —
+  // meta identifies whose trail this is when inspecting localStorage directly �
   // the storage key itself is just an opaque guid/callsign.
   function _saveTrailData(key, show, pts, meta) {
     try {
@@ -204,7 +204,7 @@
   }
 
   // Runs once per page load, before any aircraft_update has arrived, so there's no
-  // "still live" set to check against — a trail last written more than the grace
+  // "still live" set to check against � a trail last written more than the grace
   // period ago is orphaned by definition. Catches trails whose owning aircraft
   // vanished while the page was closed, which _scheduleTrailCleanup's in-session
   // timer can never see.
@@ -222,9 +222,9 @@
     }
   }
 
-  // ── Icon helpers ──────────────────────────────────────────────────────────
+  // -- Icon helpers ----------------------------------------------------------
 
-  // Map icon-size attr (1–10) to pixels: 1→92 px, 5→140 px, 10→200 px
+  // Map icon-size attr (1�10) to pixels: 1?92 px, 5?140 px, 10?200 px
   function iconPx(sizeAttr) { return 40 + sizeAttr * 1; }
 
   // Layers to colorize (by inkscape:label, lowercased)
@@ -242,7 +242,7 @@
       titleEl.remove();
     }
     for (const g of doc.getElementsByTagName('g')) {
-      // inkscape:label is a namespace-prefixed XML attribute — CSS attribute
+      // inkscape:label is a namespace-prefixed XML attribute � CSS attribute
       // selectors can't match it, so read it directly via getAttribute / getAttributeNS
       const label = (g.getAttributeNS(_INKSCAPE_NS, 'label') ||
                      g.getAttribute('inkscape:label') || '').toLowerCase();
@@ -293,7 +293,7 @@
     });
   }
 
-  // ── Shadow DOM template ───────────────────────────────────────────────────
+  // -- Shadow DOM template ---------------------------------------------------
   const template = document.createElement('template');
   template.innerHTML = `
     <style>
@@ -306,7 +306,7 @@
       }
       #map { width: 100%; height: 100%; }
 
-      /* ── overlays ── */
+      /* -- overlays -- */
       #ws-status, #follow-status {
         position: absolute;
         z-index: 1000;
@@ -352,14 +352,14 @@
       #follow-status button:hover { opacity: 1; }
     </style>
     <div id="map"></div>
-    <div id="ws-status" class="connecting">connecting…</div>
+    <div id="ws-status" class="connecting">connecting�</div>
     <div id="follow-status" hidden>
-      <span>▶</span>
+      <span>?</span>
       <span id="follow-label"></span>
-      <button type="button" data-joinfs-unfollow aria-label="Stop following">×</button>
+      <button type="button" data-joinfs-unfollow aria-label="Stop following">�</button>
     </div>`;
 
-  // ── Custom element ────────────────────────────────────────────────────────
+  // -- Custom element --------------------------------------------------------
   class JoinFsMap extends HTMLElement {
     static get observedAttributes() { return ['uri', 'stale-timeout', 'theme', 'follow', 'icon-size', 'icon-stroke-width']; }
 
@@ -368,7 +368,7 @@
       this.attachShadow({ mode: 'open' });
       this.shadowRoot.appendChild(template.content.cloneNode(true));
       this._markers        = new Map();
-      this._pendingCleanup = new Map(); // key → timeout id, aircraft removed but grace period not elapsed
+      this._pendingCleanup = new Map(); // key ? timeout id, aircraft removed but grace period not elapsed
       this._L              = null;
       this._map            = null;
       this._tileLayer      = null;
@@ -402,7 +402,7 @@
       }
     }
 
-    // ── attribute getters ─────────────────────────────────────────────────
+    // -- attribute getters -------------------------------------------------
 
     get _uri() {
       return this.getAttribute('uri') || 'ws://localhost/ws/';
@@ -417,13 +417,13 @@
       return (this.getAttribute('follow') || '').trim().toLowerCase();
     }
 
-    // icon-size: 0–10, default 5
+    // icon-size: 0-10, default 5
     get _iconSize() {
       const v = parseInt(this.getAttribute('icon-size'), 10);
       return Math.min(10, Math.max(1, Number.isFinite(v) ? v : 5));
     }
 
-    // ── init ──────────────────────────────────────────────────────────────
+    // -- init --------------------------------------------------------------
 
     async _initMap() {
       const { L, css } = await loadLeaflet();
@@ -506,7 +506,7 @@
       if (this._follow) this._applyFollow();
     }
 
-    // ── theme ─────────────────────────────────────────────────────────────
+    // -- theme -------------------------------------------------------------
 
     _applyTheme() {
       const attr = this.getAttribute('theme');
@@ -542,7 +542,7 @@
       }).addTo(this._map);
     }
 
-    // ── follow ────────────────────────────────────────────────────────────
+    // -- follow ------------------------------------------------------------
 
     _matchesFollow(ac) {
       const t = this._follow;
@@ -583,7 +583,7 @@
       }
     }
 
-    // ── WebSocket ─────────────────────────────────────────────────────────
+    // -- WebSocket ---------------------------------------------------------
 
     _connect() {
       const uri = this._uri;
@@ -625,7 +625,7 @@
       this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true, detail }));
     }
 
-    // ── aircraft data ─────────────────────────────────────────────────────
+    // -- aircraft data -----------------------------------------------------
 
     _onMessage(msg) {
       if (msg.type !== 'aircraft_update') return;
@@ -639,7 +639,7 @@
 
       if (isPlaceholderPosition(ac)) {
         // JoinFS can send this fixed fix mid-session too (e.g. a momentary loss of
-        // position), not just before an aircraft's first real fix — ignore it
+        // position), not just before an aircraft's first real fix � ignore it
         // entirely rather than moving the marker or recording a trail point, but
         // keep the aircraft alive so _purgeStale doesn't drop it over one bad tick.
         const existing = this._markers.get(key);
@@ -720,7 +720,7 @@
     }
 
     // Delete a departed aircraft's stored trail after a grace period, unless it
-    // reappears (same guid/callsign) before the timer fires — see _updateAircraft.
+    // reappears (same guid/callsign) before the timer fires � see _updateAircraft.
     _scheduleTrailCleanup(key) {
       if (this._pendingCleanup.has(key)) clearTimeout(this._pendingCleanup.get(key));
       const timer = setTimeout(() => {
@@ -746,7 +746,7 @@
       }
     }
 
-    // ── trails ────────────────────────────────────────────────────────────
+    // -- trails ------------------------------------------------------------
 
     _shouldSavePoint(trail, ac) {
       if (trail.length === 0) return true;
@@ -837,7 +837,7 @@
       if (entry.marker.isPopupOpen()) entry.marker.getPopup().setContent(this._popupHtml(entry.ac));
     }
 
-    // ── hover tooltip HTML ───────────────────────────────────────────────
+    // -- hover tooltip HTML -----------------------------------------------
 
     _tooltipHtml(ac) {
       if (!ac) return '';
@@ -845,7 +845,7 @@
       return [ac.callsign, ac.nickname, typeCode].filter(Boolean).join(' • ');
     }
 
-    // ── popup HTML ────────────────────────────────────────────────────────
+    // -- popup HTML --------------------------------------------------------
 
     _popupHtml(ac) {
       if (!ac) return '';
@@ -868,7 +868,7 @@
              </tr>`
           : '';
 
-      const route   = [ac.from, ac.to].filter(Boolean).join(' → ');
+      const route   = [ac.from, ac.to].filter(Boolean).join(' ➜ ');
       const lights  = ac.lights  ? Object.entries(ac.lights) .filter(([,v]) => v).map(([k]) => k).join(', ') : '';
       const engines = ac.engines ? Object.entries(ac.engines).filter(([,v]) => v).map(([k]) => k.replace('Running','')).join(', ') : '';
 
@@ -876,8 +876,8 @@
         <div style="font-family:sans-serif;font-size:13px;min-width:190px;color:${text}">
           <div style="font-size:15px;font-weight:700;margin-bottom:6px;
                       border-bottom:2px solid ${color};padding-bottom:4px">
-            <span style="color:${color}">✈</span> ${ac.callsign || '—'}
-            ${typeCode ? `<span style="font-weight:400;font-size:12px;color:${muted}"> · ${typeCode}</span>` : ''}
+            <span style="color:${color}">?</span> ${ac.callsign || '—'}
+            ${typeCode ? `<span style="font-weight:400;font-size:12px;color:${muted}"> • ${typeCode}</span>` : ''}
           </div>
           <table style="border-collapse:collapse;line-height:1.55">
             ${row('Pilot',    ac.nickname)}

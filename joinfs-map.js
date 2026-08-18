@@ -169,7 +169,11 @@
     return ac.latitude === 0 && Math.abs(ac.longitude - 90.000323) < 1e-6;
   }
 
-  function _lsKey(key)  { return 'joinfs-trail-' + key; }
+  const _LS_PREFIX = 'joinfs-trail-';
+  // Shared by _scheduleTrailCleanup (in-session) and _sweepOrphanedTrails (page-load).
+  const TRAIL_CLEANUP_GRACE_MS = 15 * 60 * 1000;
+
+  function _lsKey(key)  { return _LS_PREFIX + key; }
 
   function _loadTrailData(key) {
     try {
@@ -194,8 +198,28 @@
         show, pts,
         pilotName: meta.pilotName || '', registration: meta.registration || '',
         startedAt: meta.startedAt || null,
+        updatedAt: Date.now(),
       }));
     } catch {}
+  }
+
+  // Runs once per page load, before any aircraft_update has arrived, so there's no
+  // "still live" set to check against — a trail last written more than the grace
+  // period ago is orphaned by definition. Catches trails whose owning aircraft
+  // vanished while the page was closed, which _scheduleTrailCleanup's in-session
+  // timer can never see.
+  function _sweepOrphanedTrails() {
+    const cutoff = Date.now() - TRAIL_CLEANUP_GRACE_MS;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const lsKey = localStorage.key(i);
+      if (!lsKey || !lsKey.startsWith(_LS_PREFIX)) continue;
+      try {
+        const d = JSON.parse(localStorage.getItem(lsKey));
+        if (!d.updatedAt || d.updatedAt < cutoff) localStorage.removeItem(lsKey);
+      } catch {
+        localStorage.removeItem(lsKey);
+      }
+    }
   }
 
   // ── Icon helpers ──────────────────────────────────────────────────────────
@@ -359,6 +383,7 @@
     }
 
     connectedCallback() {
+      _sweepOrphanedTrails();
       this._initMap().then(() => this._connect());
     }
 
@@ -702,7 +727,7 @@
         this._pendingCleanup.delete(key);
         if (this._markers.has(key)) return;
         try { localStorage.removeItem(_lsKey(key)); } catch {}
-      }, 15 * 60 * 1000);
+      }, TRAIL_CLEANUP_GRACE_MS);
       this._pendingCleanup.set(key, timer);
     }
 

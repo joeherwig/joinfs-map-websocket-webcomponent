@@ -22,7 +22,7 @@ A self-contained, zero-dependency web component that displays live aircraft posi
 Grab the single component file and include it in your page:
 
 ```
-[https://raw.githubusercontent.com/joeherwig/joinfs-map-websocket-webcomponent/main/joinfs-map.js](https://cdn.jsdelivr.net/gh/joeherwig/joinfs-map-websocket-webcomponent@main/joinfs-map.js)
+https://raw.githubusercontent.com/joeherwig/joinfs-map-websocket-webcomponent/main/joinfs-map.js
 ```
 
 Or clone the repo:

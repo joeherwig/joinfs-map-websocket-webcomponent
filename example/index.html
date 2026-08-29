@@ -249,12 +249,20 @@
   const iconSize = params.get('iconsize') ?? params.get('icon-size');
   if (iconSize !== null) mapEl.setAttribute('icon-size', iconSize);
 
+  // ?label-css=... — restyle the dark-theme place-name overlay.
+  // Value is a URL-encoded CSS declaration list, e.g.
+  //   encodeURIComponent("filter: hue-rotate(180deg); opacity: 0.33;")
+  const labelCss = params.get('label-css') ?? params.get('labelcss');
+  if (labelCss !== null) mapEl.setAttribute('label-css', labelCss);
+
   // When a Follow/Unfollow action occurs inside the component, mirror it to the URL
   mapEl.addEventListener('joinfs-follow', e => {
     const cs = e.detail?.callsign;
     const url = new URL(location.href);
+    const keepLabelCss = url.searchParams.get('label-css');
     url.search = '';
     if (cs) url.searchParams.set('callsign', cs);
+    if (keepLabelCss !== null) url.searchParams.set('label-css', keepLabelCss);
     history.replaceState(null, '', url.toString());
   });
 </script>

@@ -106,11 +106,17 @@ A ready-to-use fullscreen demo with dark/light toggle and URL-based follow suppo
     const sz = params.get('iconsize') ?? params.get('icon-size');
     if (sz !== null) mapEl.setAttribute('icon-size', sz);
 
-    // Mirror follow changes back to the URL
+    // ?label-css=...  — restyle the dark-theme place-name overlay (URL-encoded CSS)
+    const labelCss = params.get('label-css') ?? params.get('labelcss');
+    if (labelCss !== null) mapEl.setAttribute('label-css', labelCss);
+
+    // Mirror follow changes back to the URL (keeping label-css if present)
     mapEl.addEventListener('joinfs-follow', e => {
       const url = new URL(location.href);
+      const keepLabelCss = url.searchParams.get('label-css');
       url.search = '';
       if (e.detail?.callsign) url.searchParams.set('callsign', e.detail.callsign);
+      if (keepLabelCss !== null) url.searchParams.set('label-css', keepLabelCss);
       history.replaceState(null, '', url.toString());
     });
   </script>
@@ -131,7 +137,7 @@ A ready-to-use fullscreen demo with dark/light toggle and URL-based follow suppo
 | `theme` | `auto` \| `light` \| `dark` | `auto` | Map and UI colour scheme. `auto` follows the browser's `prefers-color-scheme` setting and updates live when the OS switches. |
 | `icon-size` | integer 0–10 | `5` | Aircraft icon size. 0 = smallest, 5 = medium (default), 10 = largest. Can also be set via the `?iconsize=` URL query parameter. |
 | `stale-timeout` | integer | `60` | Seconds after which an aircraft that has stopped sending updates is removed from the map. |
-| `label-css` | string | — | Dark theme only. A raw CSS declaration list applied to the place-name (city/country label) overlay, e.g. `filter: sepia(1) saturate(4) hue-rotate(180deg); opacity: 0.33;` to tint the labels and dim them. Unset = the overlay renders as-is. The overlay is raster tiles, so labels are recoloured via image filtering (`filter`), not as text. |
+| `label-css` | string | — | Dark theme only. A raw CSS declaration list applied to the place-name (city/country label) overlay, e.g. `filter: sepia(1) saturate(4) hue-rotate(180deg); opacity: 0.33;` to tint the labels and dim them. Unset = the overlay renders as-is. The overlay is raster tiles, so labels are recoloured via image filtering (`filter`), not as text. Can also be set via the `?label-css=` URL query parameter (URL-encoded). |
 | `follow` | string | — | Callsign or pilot nickname to keep centred on the map. Case-insensitive. Can also be set via `?callsign=` or `?pilot=` URL query parameters. |
 
 ---
@@ -160,6 +166,8 @@ document.querySelector('joinfs-map').addEventListener('joinfs-follow', e => {
 | `?pilot=` | `?pilot=Joe` | Start following this pilot name |
 | `?iconsize=` | `?iconsize=3` | Set icon size (0–10) if you prefer smaller or larger icons|
 | `?icon-size=` | `?icon-size=8` | Alias for `?iconsize=` |
+| `?label-css=` | `?label-css=filter%3A%20hue-rotate(180deg)%3B%20opacity%3A%200.33%3B` | Restyle the dark-theme place-name overlay. Value is a **URL-encoded** CSS declaration list (`encodeURIComponent("filter: …; opacity: …;")`). Only visible with `?theme=dark`. |
+| `?labelcss=` | — | Alias for `?label-css=` |
 
 ---
 

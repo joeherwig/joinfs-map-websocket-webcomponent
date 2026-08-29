@@ -10,7 +10,7 @@ A self-contained, zero-dependency web component that displays live aircraft posi
 - Connects to a JoinFS WebSocket server and renders aircraft in real time
 - Aircraft icons loaded from [joeherwig/AircraftIconsSVG](https://github.com/joeherwig/AircraftIconsSVG) — real silhouettes per aircraft type
 - Colors reflect altitude (ADSBExchange style: orange → green → blue → magenta)
-- Dark / light / auto theming with live tile-layer switching
+- Dark / light / auto theming with live tile-layer switching (OpenStreetMap light, Esri Dark Gray Canvas dark — both keyless)
 - Follow an aircraft by callsign or pilot name — via attribute or URL query string
 - Popup with full flight-plan data (type, route, altitude, speed, COM, squawk, lights, engines…)
 - Auto-reconnects on WebSocket disconnect; stale aircraft purged automatically
@@ -130,6 +130,7 @@ A ready-to-use fullscreen demo with dark/light toggle and URL-based follow suppo
 | `theme` | `auto` \| `light` \| `dark` | `auto` | Map and UI colour scheme. `auto` follows the browser's `prefers-color-scheme` setting and updates live when the OS switches. |
 | `icon-size` | integer 0–10 | `5` | Aircraft icon size. 0 = smallest, 5 = medium (default), 10 = largest. Can also be set via the `?iconsize=` URL query parameter. |
 | `stale-timeout` | integer | `60` | Seconds after which an aircraft that has stopped sending updates is removed from the map. |
+| `label-css` | string | — | Dark theme only. A raw CSS declaration list applied to the place-name (city/country label) overlay, e.g. `filter: sepia(1) saturate(4) hue-rotate(180deg); opacity: 0.33;` to tint the labels and dim them. Unset = the overlay renders as-is. The overlay is raster tiles, so labels are recoloured via image filtering (`filter`), not as text. |
 | `follow` | string | — | Callsign or pilot nickname to keep centred on the map. Case-insensitive. Can also be set via `?callsign=` or `?pilot=` URL query parameters. |
 
 ---

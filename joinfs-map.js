@@ -13,18 +13,32 @@
   }
 
   // ── Tile layer URLs ───────────────────────────────────────────────────────
+  // Each theme is a list of stacked tile layers, drawn bottom-to-top.
+  // CARTO's dark basemap was dropped when CARTO began requiring an API key
+  // (Aug 2026) — unauthenticated tiles now carry an "API KEY REQUIRED" watermark.
+  // Esri's Dark Gray Canvas is still served keyless, but splits basemap and
+  // place-name labels into two layers, so dark needs both. Its raster LODs stop
+  // at zoom 16 (maxNativeZoom); Leaflet upscales past that instead of blanking.
   const TILES = {
-    light: {
+    light: [{
       url:         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom:     19,
-    },
-    dark: {
-      url:         'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      maxZoom:     20,
-      subdomains:  'abcd',
-    },
+    }],
+    dark: [{
+      url:           'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      attribution:   'Tiles © <a href="https://www.esri.com/">Esri</a> — Esri, HERE, Garmin, © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxNativeZoom: 16,
+      maxZoom:       19,
+    }, {
+      // place-name labels — transparent overlay, stacked above the base layer.
+      // className marks it as the layer the `label-css` attribute restyles
+      // (raster tiles → CSS filter/opacity, see _labelCss).
+      url:           'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+      maxNativeZoom: 16,
+      maxZoom:       19,
+      className:     'joinfs-labels',
+    }],
   };
 
   // ── CSS injected into shadow root when dark mode is active ────────────────
@@ -361,7 +375,7 @@
 
   // ── Custom element ────────────────────────────────────────────────────────
   class JoinFsMap extends HTMLElement {
-    static get observedAttributes() { return ['uri', 'stale-timeout', 'theme', 'follow', 'icon-size', 'icon-stroke-width']; }
+    static get observedAttributes() { return ['uri', 'stale-timeout', 'theme', 'follow', 'icon-size', 'icon-stroke-width', 'label-css']; }
 
     constructor() {
       super();
@@ -371,7 +385,7 @@
       this._pendingCleanup = new Map(); // key → timeout id, aircraft removed but grace period not elapsed
       this._L              = null;
       this._map            = null;
-      this._tileLayer      = null;
+      this._tileLayers     = [];
       this._themeStyle     = null;
       this._mq             = null;
       this._mqListener     = null;
@@ -400,6 +414,7 @@
         this._strokeWidth = newVal || null;
         this._refreshAllIcons();
       }
+      if (name === 'label-css')       { this._applyLabelStyle(); }
     }
 
     // ── attribute getters ─────────────────────────────────────────────────
@@ -526,20 +541,49 @@
         this._isDark = attr === 'dark';
       }
       this._swapTileLayer();
-      if (this._themeStyle)
-        this._themeStyle.textContent = this._isDark ? DARK_POPUP_CSS : '';
+      this._applyLabelStyle();
       this._refreshAllIcons();
+    }
+
+    // ── label overlay styling ─────────────────────────────────────────────
+    // The dark theme's place-name layer is raster tiles, so the labels can't be
+    // recoloured as text — but CSS declarations on the layer container restyle the
+    // whole overlay cheaply (no tile reload). `label-css` is a raw declaration
+    // list applied to that container, e.g.
+    //   label-css="filter: sepia(1) saturate(4) hue-rotate(180deg); opacity: 0.33;"
+    // Each declaration is forced !important: Leaflet writes an inline
+    // style.opacity (=1) on the layer container for its fade animation, which
+    // would otherwise clobber a plain `opacity` here. Unset → tiles render as-is.
+    // Dark theme only.
+    _labelCss() {
+      const raw = (this.getAttribute('label-css') || '').trim();
+      if (!raw) return '';
+      const decls = raw.split(';')
+        .map(d => d.trim())
+        .filter(Boolean)
+        .map(d => /!important$/.test(d) ? d : `${d} !important`)
+        .join('; ');
+      return `.joinfs-labels { ${decls}; }`;
+    }
+
+    _applyLabelStyle() {
+      if (!this._themeStyle) return;
+      this._themeStyle.textContent = this._isDark ? DARK_POPUP_CSS + '\n' + this._labelCss() : '';
     }
 
     _swapTileLayer() {
       if (!this._L || !this._map) return;
-      const cfg = this._isDark ? TILES.dark : TILES.light;
-      if (this._tileLayer) this._map.removeLayer(this._tileLayer);
-      this._tileLayer = this._L.tileLayer(cfg.url, {
-        attribution: cfg.attribution,
-        maxZoom:     cfg.maxZoom,
-        ...(cfg.subdomains ? { subdomains: cfg.subdomains } : {}),
-      }).addTo(this._map);
+      const cfgs = this._isDark ? TILES.dark : TILES.light;
+      for (const layer of this._tileLayers) this._map.removeLayer(layer);
+      // Leaflet auto-assigns an increasing z-index per tileLayer as it's added,
+      // so a later layer (e.g. the dark labels overlay) sits above earlier ones.
+      this._tileLayers = cfgs.map(cfg => this._L.tileLayer(cfg.url, {
+        attribution:   cfg.attribution,
+        maxZoom:       cfg.maxZoom,
+        ...(cfg.maxNativeZoom ? { maxNativeZoom: cfg.maxNativeZoom } : {}),
+        ...(cfg.subdomains    ? { subdomains:    cfg.subdomains }    : {}),
+        ...(cfg.className     ? { className:     cfg.className }     : {}),
+      }).addTo(this._map));
     }
 
     // ── follow ────────────────────────────────────────────────────────────

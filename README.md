@@ -50,7 +50,8 @@ git clone https://github.com/joeherwig/joinfs-map-websocket-webcomponent.git
     lat="51.0"
     lon="10.0"
     zoom="6"
-    style="width:100vw;height:100vh;display:block">
+    style="width:100vw;height:100vh;display:block"
+    label-css="filter: sepia(1) saturate(4) hue-rotate(0deg) brightness(.7); opacity: .5;">
   </joinfs-map>
 
   <script src="https://raw.githubusercontent.com/joeherwig/joinfs-map-websocket-webcomponent/main/joinfs-map.js"></script>

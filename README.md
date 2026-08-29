@@ -53,7 +53,7 @@ git clone https://github.com/joeherwig/joinfs-map-websocket-webcomponent.git
     style="width:100vw;height:100vh;display:block">
   </joinfs-map>
 
-  <script src="joinfs-map.js"></script>
+  <script src="https://raw.githubusercontent.com/joeherwig/joinfs-map-websocket-webcomponent/main/joinfs-map.js"></script>
 </body>
 </html>
 ```
@@ -92,7 +92,7 @@ A ready-to-use fullscreen demo with dark/light toggle and URL-based follow suppo
     icon-size="5">
   </joinfs-map>
 
-  <script src="joinfs-map.js"></script>
+  <script src="https://raw.githubusercontent.com/joeherwig/joinfs-map-websocket-webcomponent/main/joinfs-map.js"></script>
   <script>
     const mapEl = document.getElementById('map');
     const params = new URLSearchParams(location.search);
